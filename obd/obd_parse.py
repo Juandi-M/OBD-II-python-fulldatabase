@@ -1,5 +1,5 @@
 import re
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 NOISE_PREFIXES = (
     "SEARCHING",
@@ -7,6 +7,11 @@ NOISE_PREFIXES = (
     "UNABLE TO CONNECT",
     "STOPPED",
     "NO DATA",
+    "CAN ERROR",
+    "BUFFER FULL",
+    "BUS BUSY",
+    "BUS ERROR",
+    "DATA ERROR",
     "?",
     "ELM",
     "OK",
@@ -14,15 +19,19 @@ NOISE_PREFIXES = (
 
 HEXISH_RE = re.compile(r"^[0-9A-Fa-f ]+$")
 
+VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")  # excludes I,O,Q
+
+
 def _is_noise(line: str) -> bool:
     up = line.strip().upper()
     return any(up.startswith(p) for p in NOISE_PREFIXES)
 
+
 def normalize_tokens(line: str) -> List[str]:
-    # keep hex+spaces only
     clean = re.sub(r"[^0-9A-Fa-f ]", "", line)
     tokens = [t.upper() for t in clean.split() if t]
     return tokens
+
 
 def group_by_ecu(lines: List[str], headers_on: bool = True) -> Dict[str, List[List[str]]]:
     out: Dict[str, List[List[str]]] = {}
@@ -31,6 +40,7 @@ def group_by_ecu(lines: List[str], headers_on: bool = True) -> Dict[str, List[Li
             continue
         if _is_noise(ln):
             continue
+
         tokens = normalize_tokens(ln)
         if not tokens:
             continue
@@ -44,17 +54,15 @@ def group_by_ecu(lines: List[str], headers_on: bool = True) -> Dict[str, List[Li
             out.setdefault("NOHDR", []).append(tokens)
     return out
 
+
 def payload_from_tokens(tokens: List[str], headers_on: bool = True) -> List[str]:
     """
-    Converts one ELM line into payload bytes (strings).
-    Handles common ELM pattern: <ECU> <LEN> <DATA...>
+    Typical ELM line (CAN): <ECU> <LEN> <DATA...>
+    We drop ECU, and drop LEN if it looks like a length byte.
     """
-    if headers_on:
-        rest = tokens[1:]
-    else:
-        rest = tokens[:]
+    rest = tokens[1:] if headers_on else tokens[:]
 
-    # Drop length byte if it looks like one
+    # Drop a length byte if plausible
     if rest:
         try:
             ln = int(rest[0], 16)
@@ -62,7 +70,9 @@ def payload_from_tokens(tokens: List[str], headers_on: bool = True) -> List[str]
                 rest = rest[1:]
         except ValueError:
             pass
+
     return rest
+
 
 def merge_payloads(grouped: Dict[str, List[List[str]]], headers_on: bool = True) -> Dict[str, List[str]]:
     merged: Dict[str, List[str]] = {}
@@ -73,15 +83,46 @@ def merge_payloads(grouped: Dict[str, List[List[str]]], headers_on: bool = True)
         merged[ecu] = out
     return merged
 
-def find_obd_response_payload(merged_payloads: Dict[str, List[str]], expected_prefix: List[str]) -> Tuple[str, List[str]] | None:
+
+def find_obd_response_payload(
+    merged_payloads: Dict[str, List[str]],
+    expected_prefix: List[str],
+    prefer_ecus: Optional[List[str]] = None,
+) -> Optional[Tuple[str, List[str]]]:
     """
-    Find first ECU whose merged payload contains expected_prefix (e.g. ["41","00"] or ["49","02"]).
-    Returns (ecu, payload) or None.
+    Find ECU whose merged payload contains expected_prefix.
+    If prefer_ecus provided, try those ECUs first (in order).
+    Returns (ecu, payload_from_prefix) or None.
     """
-    for ecu, payload in merged_payloads.items():
-        # scan for prefix
-        n = len(expected_prefix)
+    ecu_order = list(merged_payloads.keys())
+
+    if prefer_ecus:
+        # stable ordering: preferred first, then the rest
+        preferred = [e for e in prefer_ecus if e in merged_payloads]
+        rest = [e for e in ecu_order if e not in preferred]
+        ecu_order = preferred + rest
+
+    n = len(expected_prefix)
+    for ecu in ecu_order:
+        payload = merged_payloads.get(ecu, [])
         for i in range(0, max(0, len(payload) - n + 1)):
-            if payload[i:i+n] == expected_prefix:
+            if payload[i : i + n] == expected_prefix:
                 return ecu, payload[i:]
     return None
+
+
+def extract_ascii_from_hex_tokens(tokens: List[str]) -> str:
+    s = ""
+    for t in tokens:
+        try:
+            b = int(t, 16)
+        except Exception:
+            continue
+        if 32 <= b <= 126:
+            s += chr(b)
+    return s
+
+
+def is_valid_vin(vin: str) -> bool:
+    vin = (vin or "").strip().upper()
+    return bool(VIN_RE.match(vin))

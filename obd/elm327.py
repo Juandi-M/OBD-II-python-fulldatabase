@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Optional, List, Callable, Dict
+from typing import Optional, List, Callable
 
 import serial
 import serial.tools.list_ports
@@ -113,12 +113,11 @@ class ELM327:
 
     def _initialize(self) -> bool:
         try:
-            # Reset
             resp_lines = self.send_raw_lines("ATZ", timeout=2.0)
             resp = "\n".join(resp_lines)
             self.elm_version = self._extract_version(resp) or "unknown"
 
-            # Basic config (keep your intent)
+            # Basic config
             self.send_raw_lines("ATE0", timeout=1.0)  # echo off
             self.send_raw_lines("ATL0", timeout=1.0)  # linefeeds off
             self.send_raw_lines("ATS0", timeout=1.0)  # spaces off
@@ -129,7 +128,6 @@ class ELM327:
             else:
                 self.send_raw_lines("ATH0", timeout=1.0)
 
-            # Helpful on real cars/clones
             self.send_raw_lines("ATAT1", timeout=1.0)  # adaptive timing
             self.send_raw_lines("ATSP0", timeout=1.0)  # auto protocol
 
@@ -138,6 +136,20 @@ class ELM327:
                 self.send_raw_lines("ATAL", timeout=1.0)
             except CommunicationError:
                 pass
+
+            # Verify headers really work (some clones lie)
+            # If headers_on=True but we can't see header-like lines on 0100, disable internally.
+            if self.headers_on:
+                try:
+                    lines = self.send_raw_lines("0100", timeout=max(self.timeout, 2.0))
+                    # heuristic: a CAN header is usually 3 hex chars like 7E8/7E0/7E9...
+                    looks_like_header = any(re.match(r"^[0-9A-F]{3}\s", ln.strip().upper()) for ln in lines)
+                    if not looks_like_header:
+                        # Fall back: treat as headers_off to avoid mis-parsing
+                        self.headers_on = False
+                except Exception:
+                    # don't fail init just for this
+                    pass
 
             return True
         except (CommunicationError, serial.SerialException):
@@ -170,24 +182,27 @@ class ELM327:
         command: str,
         timeout: Optional[float] = None,
         silence_timeout: float = 0.25,
+        min_wait_before_silence_break: float = 0.75,
     ) -> List[str]:
         """
         Sends command and returns response as a list of non-empty lines.
-        Robust: reads until '>' prompt or timeouts. No fixed sleep delay.
+
+        Robust:
+        - Primary termination: '>' prompt
+        - Secondary termination: silence break AFTER at least min_wait_before_silence_break
+          (prevents cutting multi-frame / multi-ECU replies)
         """
         self._check_connection()
         if timeout is None:
             timeout = self.timeout
 
         try:
-            # Clear buffers
             try:
                 self.connection.reset_input_buffer()
                 self.connection.reset_output_buffer()
             except Exception:
                 pass
 
-            # Log TX (lines empty)
             if self.raw_logger:
                 self.raw_logger("TX", command, [])
 
@@ -211,10 +226,9 @@ class ELM327:
                     if b">" in chunk or b">" in buf:
                         break
                 else:
-                    if (now - last_rx) > silence_timeout:
-                        time.sleep(0.02)
-                        if self.connection.in_waiting == 0:
-                            break
+                    # Only allow silence break after we waited enough overall
+                    if (now - start) >= min_wait_before_silence_break and (now - last_rx) > silence_timeout:
+                        break
                     time.sleep(0.01)
 
             text = buf.decode("utf-8", errors="ignore")
@@ -236,22 +250,11 @@ class ELM327:
         except Exception as e:
             raise CommunicationError(f"Unexpected error: {e}")
 
-    def send_raw(
-        self,
-        command: str,
-        timeout: Optional[float] = None,
-    ) -> str:
-        """
-        Backward-compatible: returns a single string joining lines with spaces.
-        """
+    def send_raw(self, command: str, timeout: Optional[float] = None) -> str:
         lines = self.send_raw_lines(command, timeout=timeout)
-        # old behavior: " ".join(lines)
         return " ".join(lines)
 
     def send_obd(self, command: str) -> str:
-        """
-        Backward-compatible: returns cleaned hex-only string or special errors.
-        """
         try:
             resp_lines = self.send_raw_lines(command, timeout=max(self.timeout, 2.0))
         except DeviceDisconnectedError:
@@ -274,10 +277,6 @@ class ELM327:
         return hex_only
 
     def send_obd_lines(self, command: str) -> List[str]:
-        """
-        New: returns raw lines for OBD commands.
-        If errors occur, raises CommunicationError/DeviceDisconnectedError.
-        """
         return self.send_raw_lines(command, timeout=max(self.timeout, 2.0))
 
     def test_vehicle_connection(self) -> bool:
@@ -288,18 +287,31 @@ class ELM327:
 
     def negotiate_protocol(self) -> str:
         """
-        Nivel 1: tries ATSP0 then common CAN protocols.
-        Returns protocol code (e.g., '0','6','7','8','9') if it can get a 0100 response.
+        Tries ATSP0 then common CAN protocols.
+        Restores ATSP0 if it can't find a working one.
         """
+        # Save current (best-effort)
+        try:
+            current = self.send_raw("ATDPN", timeout=1.0).strip().upper()
+        except Exception:
+            current = ""
+
         candidates = ["0", "6", "7", "8", "9"]
-        for p in candidates:
-            self.send_raw_lines(f"ATSP{p}", timeout=1.0)
-            # Some adapters need a pause after protocol switch
-            time.sleep(0.05)
-            lines = self.send_raw_lines("0100", timeout=max(self.timeout, 2.0))
-            joined = " ".join(lines).upper().replace(" ", "")
-            if "4100" in joined or "4100" in joined:
-                return p
+        try:
+            for p in candidates:
+                self.send_raw_lines(f"ATSP{p}", timeout=1.0)
+                time.sleep(0.05)
+                lines = self.send_raw_lines("0100", timeout=max(self.timeout, 2.0))
+                joined = " ".join(lines).upper().replace(" ", "")
+                if "4100" in joined:
+                    return p
+        finally:
+            # If we didn't return successfully, go back to auto
+            try:
+                self.send_raw_lines("ATSP0", timeout=1.0)
+            except Exception:
+                pass
+
         raise CommunicationError("Protocol negotiation failed (0100 did not respond)")
 
     def get_protocol(self) -> str:
