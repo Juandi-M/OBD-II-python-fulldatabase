@@ -48,12 +48,14 @@ class DTCDatabase:
     """
 
     # Map of manufacturer keywords to their CSV files
+    # IMPORTANT: These must match the actual filenames exactly!
     MANUFACTURER_FILES = {
-        "chrysler": "dtc_jeep_dodge_Chrysler.csv",
-        "jeep": "dtc_jeep_dodge_Chrysler.csv",
-        "dodge": "dtc_jeep_dodge_Chrysler.csv",
-        "landrover": "dtc_landrover.csv",
-        "jaguar": "dtc_landrover.csv",
+        "chrysler": "dtc_jeep_dodge_chrysler.csv",  # lowercase
+        "jeep": "dtc_jeep_dodge_chrysler.csv",
+        "dodge": "dtc_jeep_dodge_chrysler.csv",
+        "landrover": "dtc_land_rover.csv",          # with underscore
+        "land_rover": "dtc_land_rover.csv",
+        "jaguar": "dtc_land_rover.csv",
     }
 
     def __init__(self, manufacturer: Optional[str] = None):
@@ -66,6 +68,7 @@ class DTCDatabase:
         """
         self.codes: Dict[str, DTCInfo] = {}
         self.manufacturer = manufacturer
+        self._loaded_files: List[str] = []
         self._load_databases()
 
     def _load_databases(self):
@@ -83,48 +86,56 @@ class DTCDatabase:
         # Load manufacturer-specific codes (they override generic for P1xxx codes)
         if self.manufacturer:
             # Load only the specified manufacturer
-            mfr_lower = self.manufacturer.lower()
+            mfr_lower = self.manufacturer.lower().replace(" ", "_")
             if mfr_lower in self.MANUFACTURER_FILES:
                 mfr_file = data_dir / self.MANUFACTURER_FILES[mfr_lower]
                 if mfr_file.exists():
                     self._load_from_csv(mfr_file, mfr_lower)
         else:
-            # Load all manufacturer files
+            # Load all manufacturer files (but avoid duplicates)
+            loaded_files = set()
             for mfr_name, filename in self.MANUFACTURER_FILES.items():
-                mfr_path = data_dir / filename
-                if mfr_path.exists():
-                    self._load_from_csv(mfr_path, mfr_name)
+                if filename not in loaded_files:
+                    mfr_path = data_dir / filename
+                    if mfr_path.exists():
+                        self._load_from_csv(mfr_path, mfr_name)
+                        loaded_files.add(filename)
 
     def _load_from_csv(self, csv_path: Path, source: str):
         """Load DTC codes from a single CSV file."""
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-            for line in f:
-                line = line.strip()
-                
-                # Skip empty lines and comments
-                if not line or line.startswith("#"):
-                    continue
-                
-                try:
-                    reader = csv.reader([line])
-                    row = next(reader)
+        try:
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+                self._loaded_files.append(csv_path.name)
+                for line in f:
+                    line = line.strip()
                     
-                    if len(row) < 2:
+                    # Skip empty lines and comments
+                    if not line or line.startswith("#"):
                         continue
                     
-                    code = row[0].strip().upper()
-                    description = row[1].strip()
-                    
-                    if not code:
+                    try:
+                        reader = csv.reader([line])
+                        row = next(reader)
+                        
+                        if len(row) < 2:
+                            continue
+                        
+                        code = row[0].strip().upper()
+                        description = row[1].strip()
+                        
+                        if not code:
+                            continue
+                        
+                        self.codes[code] = DTCInfo(
+                            code=code,
+                            description=description,
+                            source=source,
+                        )
+                    except (csv.Error, StopIteration):
                         continue
-                    
-                    self.codes[code] = DTCInfo(
-                        code=code,
-                        description=description,
-                        source=source,
-                    )
-                except Exception:
-                    continue
+        except (OSError, IOError) as e:
+            # Log but don't crash if file can't be read
+            print(f"Warning: Could not load {csv_path}: {e}")
 
     def set_manufacturer(self, manufacturer: str):
         """
@@ -133,11 +144,14 @@ class DTCDatabase:
         """
         self.manufacturer = manufacturer
         self.codes.clear()
+        self._loaded_files.clear()
         self._load_databases()
 
     def lookup(self, code: str) -> Optional[DTCInfo]:
         """Look up a DTC code."""
-        key = (code or "").strip().upper()
+        if not code:
+            return None
+        key = code.strip().upper()
         return self.codes.get(key)
 
     def get_description(self, code: str) -> str:
@@ -147,9 +161,9 @@ class DTCDatabase:
 
     def search(self, query: str) -> List[DTCInfo]:
         """Search codes by description or code."""
-        q = (query or "").strip().lower()
-        if not q:
+        if not query:
             return []
+        q = query.strip().lower()
         return [
             info
             for info in self.codes.values()
@@ -160,6 +174,11 @@ class DTCDatabase:
     def count(self) -> int:
         """Number of codes in database."""
         return len(self.codes)
+    
+    @property
+    def loaded_files(self) -> List[str]:
+        """List of CSV files that were loaded."""
+        return self._loaded_files.copy()
     
     @property
     def available_manufacturers(self) -> List[str]:
@@ -186,7 +205,7 @@ def decode_dtc_bytes(hex_bytes: str) -> str:
     Returns:
         Formatted DTC code (e.g., "P0118")
     """
-    if len(hex_bytes) != 4:
+    if not hex_bytes or len(hex_bytes) != 4:
         return f"INVALID:{hex_bytes}"
 
     try:
@@ -201,7 +220,7 @@ def decode_dtc_bytes(hex_bytes: str) -> str:
 
         return f"{prefix}{second_char}{rest}"
 
-    except ValueError:
+    except (ValueError, IndexError):
         return f"INVALID:{hex_bytes}"
 
 
@@ -215,10 +234,13 @@ def parse_dtc_response(response: str, mode: str = "03") -> List[str]:
     """
     dtcs: List[str] = []
 
+    if not response:
+        return dtcs
+
     prefixes = {"03": "43", "07": "47", "0A": "4A"}
     prefix = prefixes.get(mode, "43")
 
-    resp = (response or "").replace(" ", "").upper()
+    resp = response.replace(" ", "").upper()
 
     if prefix in resp:
         resp = resp.replace(prefix, "", 1)

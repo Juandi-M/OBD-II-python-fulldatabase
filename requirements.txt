@@ -1,0 +1,5 @@
+# OBD-II Scanner Requirements
+# ===========================
+
+# Serial communication with ELM327 adapters
+pyserial>=3.5

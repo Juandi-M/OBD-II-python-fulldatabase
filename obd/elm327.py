@@ -1,45 +1,68 @@
-"""
-ELM327 Communication Module
-===========================
-Handles all serial communication with ELM327 OBD2 adapters.
-"""
-
 from __future__ import annotations
 
 import re
 import time
-from typing import Optional, List
+from typing import Optional, List, Callable, Dict
 
 import serial
 import serial.tools.list_ports
 
 
-class ELM327:
-    """
-    Low-level ELM327 communication handler.
-    Manages connection, initialization, and raw command sending.
-    """
+class CommunicationError(Exception):
+    pass
 
+
+class DeviceDisconnectedError(CommunicationError):
+    pass
+
+
+class ELM327:
     BAUD_RATES = [38400, 9600, 115200, 57600, 19200]
 
-    def __init__(self, port: Optional[str] = None, baudrate: int = 38400, timeout: float = 3.0):
+    def __init__(
+        self,
+        port: Optional[str] = None,
+        baudrate: int = 38400,
+        timeout: float = 3.0,
+        raw_logger: Optional[Callable[[str, str, List[str]], None]] = None,
+    ):
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.connection: Optional[serial.Serial] = None
         self.protocol: Optional[str] = None
         self.elm_version: Optional[str] = None
+        self._is_connected = False
+
+        # Optional logger: fn(direction, command, lines)
+        self.raw_logger = raw_logger
+
+        # Nivel 1: default headers ON for robust multi-ECU parsing
+        self.headers_on = True
+
+    @property
+    def is_connected(self) -> bool:
+        if not self._is_connected:
+            return False
+        if not self.connection:
+            return False
+        try:
+            return self.connection.is_open
+        except Exception:
+            return False
 
     @staticmethod
     def find_ports() -> List[str]:
-        """Find and rank potential ELM327 USB serial ports."""
         ranked: List[tuple[int, str]] = []
+        try:
+            ports_list = serial.tools.list_ports.comports()
+        except Exception:
+            return []
 
-        for p in serial.tools.list_ports.comports():
+        for p in ports_list:
             dev = (p.device or "").lower()
             desc = (p.description or "").lower()
 
-            # Skip common non-OBD ports
             if "bluetooth" in dev or "debug-console" in dev:
                 continue
 
@@ -60,7 +83,6 @@ class ELM327:
         return [dev for _, dev in ranked]
 
     def connect(self) -> bool:
-        """Establish connection to ELM327 adapter."""
         if not self.port:
             ports = self.find_ports()
             if not ports:
@@ -76,123 +98,216 @@ class ELM327:
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
             )
-            time.sleep(0.5)
+            time.sleep(0.2)
 
             if not self._initialize():
+                self._is_connected = False
                 raise ConnectionError("ELM327 initialization failed")
 
+            self._is_connected = True
             return True
 
         except serial.SerialException as e:
+            self._is_connected = False
             raise ConnectionError(f"Serial port error: {e}")
 
     def _initialize(self) -> bool:
-        """Initialize ELM327 with standard settings."""
-        # Reset adapter
-        resp = self.send_raw("ATZ", delay=1.5)
-        self.elm_version = self._extract_version(resp) or "unknown"
+        try:
+            # Reset
+            resp_lines = self.send_raw_lines("ATZ", timeout=2.0)
+            resp = "\n".join(resp_lines)
+            self.elm_version = self._extract_version(resp) or "unknown"
 
-        # Basic configuration
-        self.send_raw("ATE0", delay=0.2)   # Echo off
-        self.send_raw("ATL0", delay=0.2)   # Linefeeds off
-        self.send_raw("ATS0", delay=0.2)   # Spaces off
-        self.send_raw("ATH0", delay=0.2)   # Headers off
+            # Basic config (keep your intent)
+            self.send_raw_lines("ATE0", timeout=1.0)  # echo off
+            self.send_raw_lines("ATL0", timeout=1.0)  # linefeeds off
+            self.send_raw_lines("ATS0", timeout=1.0)  # spaces off
 
-        # Helps many clones on real cars
-        self.send_raw("ATAT1", delay=0.2)  # Adaptive timing on (if supported)
-        self.send_raw("ATSP0", delay=0.5)  # Auto protocol
+            # Headers ON for multi-ECU robustness (you can toggle later)
+            if self.headers_on:
+                self.send_raw_lines("ATH1", timeout=1.0)
+            else:
+                self.send_raw_lines("ATH0", timeout=1.0)
 
-        return True
+            # Helpful on real cars/clones
+            self.send_raw_lines("ATAT1", timeout=1.0)  # adaptive timing
+            self.send_raw_lines("ATSP0", timeout=1.0)  # auto protocol
+
+            # Allow long messages if supported (safe ignore)
+            try:
+                self.send_raw_lines("ATAL", timeout=1.0)
+            except CommunicationError:
+                pass
+
+            return True
+        except (CommunicationError, serial.SerialException):
+            return False
 
     @staticmethod
     def _extract_version(response: str) -> Optional[str]:
-        """
-        Attempt to extract a human-ish version string from ATZ response.
-        Many clones respond with something like:
-          'ELM327 v1.5'
-          'ELM327 v2.1'
-          or random banner text.
-        """
         s = response.strip()
         if not s:
             return None
-
-        # Common patterns
         m = re.search(r"(ELM327\s*v?\s*[\w\.]+)", s, re.IGNORECASE)
         if m:
             return m.group(1).strip()
-
-        # Fallback: first 40 chars of banner
         return s[:40].strip() if s else None
 
-    def send_raw(self, command: str, delay: float = 0.5) -> str:
-        """Send raw command to ELM327 and return response (without the '>' prompt)."""
+    def _check_connection(self) -> None:
         if not self.connection:
-            raise ConnectionError("Not connected to ELM327")
+            self._is_connected = False
+            raise DeviceDisconnectedError("Not connected to ELM327")
+        try:
+            if not self.connection.is_open:
+                self._is_connected = False
+                raise DeviceDisconnectedError("Serial port is closed")
+        except (OSError, serial.SerialException) as e:
+            self._is_connected = False
+            raise DeviceDisconnectedError(f"Device disconnected: {e}")
+
+    def send_raw_lines(
+        self,
+        command: str,
+        timeout: Optional[float] = None,
+        silence_timeout: float = 0.25,
+    ) -> List[str]:
+        """
+        Sends command and returns response as a list of non-empty lines.
+        Robust: reads until '>' prompt or timeouts. No fixed sleep delay.
+        """
+        self._check_connection()
+        if timeout is None:
+            timeout = self.timeout
 
         try:
             # Clear buffers
-            self.connection.reset_input_buffer()
-            self.connection.reset_output_buffer()
+            try:
+                self.connection.reset_input_buffer()
+                self.connection.reset_output_buffer()
+            except Exception:
+                pass
 
-            # Send
+            # Log TX (lines empty)
+            if self.raw_logger:
+                self.raw_logger("TX", command, [])
+
             self.connection.write(f"{command}\r".encode("ascii", errors="ignore"))
-            time.sleep(delay)
+            self.connection.flush()
 
-            response = ""
-            start_time = time.time()
+            buf = bytearray()
+            start = time.monotonic()
+            last_rx = start
 
             while True:
-                if self.connection.in_waiting > 0:
-                    ch = self.connection.read(1).decode("utf-8", errors="ignore")
-                    if ch == ">":
-                        break
-                    response += ch
-                elif time.time() - start_time > self.timeout:
+                now = time.monotonic()
+                if (now - start) > timeout:
                     break
+
+                n = self.connection.in_waiting
+                if n:
+                    chunk = self.connection.read(n)
+                    buf.extend(chunk)
+                    last_rx = now
+                    if b">" in chunk or b">" in buf:
+                        break
                 else:
-                    time.sleep(0.02)
+                    if (now - last_rx) > silence_timeout:
+                        time.sleep(0.02)
+                        if self.connection.in_waiting == 0:
+                            break
+                    time.sleep(0.01)
 
-            # Normalize whitespace
-            response = response.replace("\r", "\n")
-            lines = [ln.strip() for ln in response.split("\n") if ln.strip()]
-            return " ".join(lines)
+            text = buf.decode("utf-8", errors="ignore")
+            text = text.replace(">", "")
+            text = text.replace("\r", "\n")
+            lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
 
+            if self.raw_logger:
+                self.raw_logger("RX", command, lines)
+
+            return lines
+
+        except (OSError, serial.SerialException) as e:
+            self._is_connected = False
+            error_str = str(e).lower()
+            if "device not configured" in error_str or "disconnected" in error_str:
+                raise DeviceDisconnectedError(f"Device disconnected: {e}")
+            raise CommunicationError(f"Communication error: {e}")
         except Exception as e:
-            raise IOError(f"Communication error: {e}")
+            raise CommunicationError(f"Unexpected error: {e}")
+
+    def send_raw(
+        self,
+        command: str,
+        timeout: Optional[float] = None,
+    ) -> str:
+        """
+        Backward-compatible: returns a single string joining lines with spaces.
+        """
+        lines = self.send_raw_lines(command, timeout=timeout)
+        # old behavior: " ".join(lines)
+        return " ".join(lines)
 
     def send_obd(self, command: str) -> str:
-        """Send OBD command and return cleaned response string (hex, no spaces)."""
-        resp = self.send_raw(command, delay=1.0)
-        up = resp.upper()
-
-        if "NO DATA" in up:
-            return "NO DATA"
-        if "UNABLE TO CONNECT" in up:
-            return "NO CONNECT"
-        if "ERROR" in up:
+        """
+        Backward-compatible: returns cleaned hex-only string or special errors.
+        """
+        try:
+            resp_lines = self.send_raw_lines(command, timeout=max(self.timeout, 2.0))
+        except DeviceDisconnectedError:
+            return "DISCONNECTED"
+        except CommunicationError:
             return "ERROR"
-        if "?" in up:
+
+        up_joined = " ".join(resp_lines).upper()
+
+        if "NO DATA" in up_joined:
+            return "NO DATA"
+        if "UNABLE TO CONNECT" in up_joined:
+            return "NO CONNECT"
+        if "ERROR" in up_joined:
+            return "ERROR"
+        if "?" in up_joined:
             return "INVALID"
 
-        # Keep only hex characters (many clones include stray text)
-        hex_only = "".join(ch for ch in up if ch in "0123456789ABCDEF")
+        hex_only = "".join(ch for ch in up_joined if ch in "0123456789ABCDEF")
         return hex_only
 
+    def send_obd_lines(self, command: str) -> List[str]:
+        """
+        New: returns raw lines for OBD commands.
+        If errors occur, raises CommunicationError/DeviceDisconnectedError.
+        """
+        return self.send_raw_lines(command, timeout=max(self.timeout, 2.0))
+
     def test_vehicle_connection(self) -> bool:
-        """Test if vehicle ECU is responding (Mode 01 PID 00)."""
         response = self.send_obd("0100")
-        # Expect a response containing 41 00 ... (hex-only already)
+        if response in ["DISCONNECTED", "ERROR", "NO CONNECT"]:
+            return False
         return "4100" in response
 
-    def get_protocol(self) -> str:
-        """Get the current OBD protocol in use."""
-        resp = self.send_raw("ATDPN", delay=0.3).strip().upper()
+    def negotiate_protocol(self) -> str:
+        """
+        Nivel 1: tries ATSP0 then common CAN protocols.
+        Returns protocol code (e.g., '0','6','7','8','9') if it can get a 0100 response.
+        """
+        candidates = ["0", "6", "7", "8", "9"]
+        for p in candidates:
+            self.send_raw_lines(f"ATSP{p}", timeout=1.0)
+            # Some adapters need a pause after protocol switch
+            time.sleep(0.05)
+            lines = self.send_raw_lines("0100", timeout=max(self.timeout, 2.0))
+            joined = " ".join(lines).upper().replace(" ", "")
+            if "4100" in joined or "4100" in joined:
+                return p
+        raise CommunicationError("Protocol negotiation failed (0100 did not respond)")
 
-        # ATDPN often returns:
-        #   "A6" meaning auto + protocol 6
-        #   "6" meaning protocol 6
-        # We want the protocol code (single hex digit/letter).
+    def get_protocol(self) -> str:
+        try:
+            resp = self.send_raw("ATDPN", timeout=1.0).strip().upper()
+        except (DeviceDisconnectedError, CommunicationError):
+            return "Unknown (disconnected)"
+
         code = None
         m = re.search(r"([0-9A-F])", resp)
         if m:
@@ -214,14 +329,15 @@ class ELM327:
         if code and code in protocol_map:
             self.protocol = protocol_map[code]
             return self.protocol
-
         return f"Unknown: {resp}"
 
     def close(self):
-        """Close the serial connection."""
+        self._is_connected = False
         if self.connection:
             try:
                 self.connection.close()
+            except Exception:
+                pass
             finally:
                 self.connection = None
 

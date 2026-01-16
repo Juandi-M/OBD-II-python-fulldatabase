@@ -14,11 +14,12 @@ import signal
 import sys
 import os
 import time
-from typing import Optional, Dict, List
+from typing import Optional, List
 
 from obd import OBDScanner, DTCDatabase, ELM327
+from obd.scanner import NotConnectedError, ConnectionLostError, ScannerError
 from obd.logger import SessionLogger
-from obd.utils import cr_timestamp, cr_time_only, VERSION, APP_NAME, cr_now
+from obd.utils import cr_timestamp, cr_time_only, VERSION, APP_NAME
 from obd.lang import t, set_language, get_language, get_available_languages, get_language_name
 
 # Global state
@@ -28,6 +29,7 @@ _dtc_db: Optional[DTCDatabase] = None
 _current_manufacturer: str = "generic"
 _log_format: str = "csv"
 _monitor_interval: float = 1.0
+_original_sigint = None
 
 
 def signal_handler(sig, frame):
@@ -45,6 +47,15 @@ def clear_screen():
 def press_enter():
     """Wait for user to press Enter."""
     input(f"\n  {t('press_enter')}")
+
+
+def handle_disconnection():
+    """Handle device disconnection - mark as disconnected and show message."""
+    global _scanner
+    if _scanner:
+        _scanner._connected = False
+    print(f"\n  ❌ {t('error')}: Device disconnected!")
+    print(f"  🔌 {t('not_connected')}")
 
 
 # =============================================================================
@@ -127,12 +138,15 @@ def action_connect():
             print(f"  ✅ {t('connected_on', port=port)}")
             
             # Show vehicle info
-            info = _scanner.get_vehicle_info()
-            print(f"\n  {t('elm_version')}: {info.get('elm_version', 'unknown')}")
-            print(f"  {t('protocol')}: {info.get('protocol', 'unknown')}")
-            mil_status = f"🔴 {t('on')}" if info.get('mil_on') == 'Yes' else f"🟢 {t('off')}"
-            print(f"  {t('mil_status')}: {mil_status}")
-            print(f"  {t('dtc_count')}: {info.get('dtc_count', '?')}")
+            try:
+                info = _scanner.get_vehicle_info()
+                print(f"\n  {t('elm_version')}: {info.get('elm_version', 'unknown')}")
+                print(f"  {t('protocol')}: {info.get('protocol', 'unknown')}")
+                mil_status = f"🔴 {t('on')}" if info.get('mil_on') == 'Yes' else f"🟢 {t('off')}"
+                print(f"  {t('mil_status')}: {mil_status}")
+                print(f"  {t('dtc_count')}: {info.get('dtc_count', '?')}")
+            except ConnectionLostError:
+                handle_disconnection()
             return
             
         except Exception as e:
@@ -144,9 +158,7 @@ def action_connect():
     
     print(f"\n  ❌ {t('no_vehicle_response')}")
     print(f"  💡 Tips:")
-    print(f"     - Turn ignition to ON")
-    print(f"     - Check OBD port connection")
-    print(f"     - Try with engine running")
+    print(f"     - {t('adapter_tip')}")
 
 
 def action_disconnect():
@@ -163,7 +175,7 @@ def action_disconnect():
 
 def action_full_scan():
     """Run full diagnostic scan."""
-    global _scanner, _dtc_db
+    global _scanner
     
     if not _scanner or not _scanner.is_connected:
         print(f"\n  ❌ {t('not_connected')}")
@@ -172,68 +184,76 @@ def action_full_scan():
     print_header(t("scan_header"))
     print(f"  🕐 {t('report_time')}: {cr_timestamp()}")
     
-    # Vehicle info
-    print_subheader(t("vehicle_connection"))
-    info = _scanner.get_vehicle_info()
-    print(f"  {t('elm_version')}: {info.get('elm_version', 'unknown')}")
-    print(f"  {t('protocol')}: {info.get('protocol', 'unknown')}")
-    print(f"  {t('mil_status')}: {info.get('mil_on', 'unknown')}")
-    print(f"  {t('dtc_count')}: {info.get('dtc_count', 'unknown')}")
-    
-    # DTCs
-    print_subheader(t("dtc_header"))
-    dtcs = _scanner.read_dtcs()
-    
-    if dtcs:
-        for dtc in dtcs:
-            emoji = "🚨" if dtc.status == "stored" else "⚠️"
-            status = f" ({dtc.status})" if dtc.status != "stored" else ""
-            print(f"\n  {emoji} {dtc.code}{status}")
-            print(f"     └─ {dtc.description}")
-    else:
-        print(f"\n  ✅ {t('no_codes')}")
-    
-    # Readiness
-    print_subheader(t("readiness_header"))
-    readiness = _scanner.read_readiness()
-    
-    if readiness:
-        complete = incomplete = 0
-        for name, status in readiness.items():
-            if name == "MIL (Check Engine Light)":
-                continue
-            if not status.available:
-                emoji = "➖"
-            elif status.complete:
-                emoji = "✅"
-                complete += 1
-            else:
-                emoji = "❌"
-                incomplete += 1
-            print(f"  {emoji} {name}: {status.status_str}")
-        print(f"\n  {t('summary')}: {complete} {t('complete')}, {incomplete} {t('incomplete')}")
-    
-    # Live data
-    print_subheader(t("live_header"))
-    readings = _scanner.read_live_data()
-    
-    if readings:
-        for reading in readings.values():
-            print(f"\n  📈 {reading.name}")
-            print(f"     └─ {reading.value} {reading.unit}")
-            
-            # Warnings
-            if reading.name == "Engine Coolant Temperature":
-                if reading.value > 105:
-                    print(f"     🔥 {t('warning_high_temp')}")
-                elif reading.value < 70:
-                    print(f"     ⚠️  {t('warning_low_temp')}")
-            elif "Throttle" in reading.name and reading.value > 5:
-                print(f"     ⚠️  {t('warning_throttle')}")
-    
-    print("\n" + "=" * 60)
-    print(f"  {t('report_time')}: {cr_timestamp()}")
-    print("=" * 60)
+    try:
+        # Vehicle info
+        print_subheader(t("vehicle_connection"))
+        info = _scanner.get_vehicle_info()
+        print(f"  {t('elm_version')}: {info.get('elm_version', 'unknown')}")
+        print(f"  {t('protocol')}: {info.get('protocol', 'unknown')}")
+        print(f"  {t('mil_status')}: {info.get('mil_on', 'unknown')}")
+        print(f"  {t('dtc_count')}: {info.get('dtc_count', 'unknown')}")
+        
+        # DTCs
+        print_subheader(t("dtc_header"))
+        dtcs = _scanner.read_dtcs()
+        
+        if dtcs:
+            for dtc in dtcs:
+                emoji = "🚨" if dtc.status == "stored" else "⚠️"
+                status = f" ({dtc.status})" if dtc.status != "stored" else ""
+                print(f"\n  {emoji} {dtc.code}{status}")
+                print(f"     └─ {dtc.description}")
+        else:
+            print(f"\n  ✅ {t('no_codes')}")
+        
+        # Readiness
+        print_subheader(t("readiness_header"))
+        readiness = _scanner.read_readiness()
+        
+        if readiness:
+            complete = incomplete = 0
+            for name, status in readiness.items():
+                if name == "MIL (Check Engine Light)":
+                    continue
+                if not status.available:
+                    emoji = "➖"
+                elif status.complete:
+                    emoji = "✅"
+                    complete += 1
+                else:
+                    emoji = "❌"
+                    incomplete += 1
+                print(f"  {emoji} {name}: {status.status_str}")
+            print(f"\n  {t('summary')}: {complete} {t('complete')}, {incomplete} {t('incomplete')}")
+        
+        # Live data
+        print_subheader(t("live_header"))
+        readings = _scanner.read_live_data()
+        
+        if readings:
+            for reading in readings.values():
+                print(f"\n  📈 {reading.name}")
+                print(f"     └─ {reading.value} {reading.unit}")
+                
+                # Warnings
+                if reading.name == "Engine Coolant Temperature":
+                    if reading.value > 105:
+                        print(f"     🔥 {t('warning_high_temp')}")
+                    elif reading.value < 70:
+                        print(f"     ⚠️  {t('warning_low_temp')}")
+                elif "Throttle" in reading.name and reading.value > 5:
+                    print(f"     ⚠️  {t('warning_throttle')}")
+        
+        print("\n" + "=" * 60)
+        print(f"  {t('report_time')}: {cr_timestamp()}")
+        print("=" * 60)
+        
+    except ConnectionLostError:
+        handle_disconnection()
+    except NotConnectedError:
+        print(f"\n  ❌ {t('not_connected')}")
+    except ScannerError as e:
+        print(f"\n  ❌ {t('error')}: {e}")
 
 
 def action_read_codes():
@@ -247,88 +267,108 @@ def action_read_codes():
     print_header(t("dtc_header"))
     print(f"  {t('time')}: {cr_timestamp()}\n")
     
-    dtcs = _scanner.read_dtcs()
-    
-    if dtcs:
-        for dtc in dtcs:
-            status = f" [{dtc.status}]" if dtc.status != "stored" else ""
-            print(f"  {dtc.code}{status}: {dtc.description}")
-    else:
-        print(f"  ✅ {t('no_codes')}")
+    try:
+        dtcs = _scanner.read_dtcs()
+        
+        if dtcs:
+            for dtc in dtcs:
+                status = f" [{dtc.status}]" if dtc.status != "stored" else ""
+                print(f"  {dtc.code}{status}: {dtc.description}")
+        else:
+            print(f"  ✅ {t('no_codes')}")
+            
+    except ConnectionLostError:
+        handle_disconnection()
+    except NotConnectedError:
+        print(f"\n  ❌ {t('not_connected')}")
+    except ScannerError as e:
+        print(f"\n  ❌ {t('error')}: {e}")
 
 
 def action_live_monitor():
     """Continuous live monitoring."""
-    global _scanner, _stop_monitoring, _monitor_interval, _log_format
+    global _scanner, _stop_monitoring, _monitor_interval, _log_format, _original_sigint
     
     if not _scanner or not _scanner.is_connected:
         print(f"\n  ❌ {t('not_connected')}")
         return
     
     _stop_monitoring = False
-    signal.signal(signal.SIGINT, signal_handler)
+    _original_sigint = signal.signal(signal.SIGINT, signal_handler)
     
-    # Ask about logging
-    print(f"\n  📊 {t('live_telemetry')}")
-    log_choice = input(f"  {t('save_log_prompt')} (y/n): ").strip().lower()
-    
-    logger = None
-    if log_choice in ['y', 's', 'o', 'j']:
-        logger = SessionLogger("logs")
-        log_file = logger.start_session(format=_log_format)
-        print(f"  📝 {t('logging_to')}: {log_file}")
-    
-    print_header(t("live_telemetry"))
-    print(f"  {t('started')}: {cr_timestamp()}")
-    print(f"  {t('refresh')}: {_monitor_interval}s")
-    print(f"\n  {t('press_ctrl_c')}\n")
-    print("-" * 70)
-    
-    # Headers
-    print(f"{t('time'):<10} {t('coolant'):<10} {'RPM':<8} {t('speed'):<8} {t('throttle'):<10} {t('pedal'):<8} {t('volts'):<8}")
-    print("-" * 70)
-    
-    pids = ["05", "0C", "0D", "11", "49", "42"]
-    
-    while not _stop_monitoring:
-        try:
-            readings = _scanner.read_live_data(pids)
+    try:
+        # Ask about logging
+        print(f"\n  📊 {t('live_telemetry')}")
+        log_choice = input(f"  {t('save_log_prompt')} (y/n): ").strip().lower()
+        
+        logger = None
+        if log_choice in ['y', 's', 'o', 'j']:
+            logger = SessionLogger("logs")
+            log_file = logger.start_session(format=_log_format)
+            print(f"  📝 {t('logging_to')}: {log_file}")
+        
+        print_header(t("live_telemetry"))
+        print(f"  {t('started')}: {cr_timestamp()}")
+        print(f"  {t('refresh')}: {_monitor_interval}s")
+        print(f"\n  {t('press_ctrl_c')}\n")
+        print("-" * 70)
+        
+        # Headers
+        print(f"{t('time'):<10} {t('coolant'):<10} {'RPM':<8} {t('speed'):<8} {t('throttle'):<10} {t('pedal'):<8} {t('volts'):<8}")
+        print("-" * 70)
+        
+        pids = ["05", "0C", "0D", "11", "49", "42"]
+        
+        while not _stop_monitoring:
+            try:
+                readings = _scanner.read_live_data(pids)
+                
+                if logger:
+                    logger.log_readings(readings)
+                
+                # Extract values
+                coolant = readings.get("05")
+                rpm = readings.get("0C")
+                speed = readings.get("0D")
+                throttle = readings.get("11")
+                pedal = readings.get("49")
+                volts = readings.get("42")
+                
+                time_str = cr_time_only()
+                coolant_str = f"{coolant.value:.0f}°C" if coolant else "---"
+                rpm_str = f"{rpm.value:.0f}" if rpm else "---"
+                speed_str = f"{speed.value:.0f}km/h" if speed else "---"
+                throttle_str = f"{throttle.value:.1f}%" if throttle else "---"
+                pedal_str = f"{pedal.value:.1f}%" if pedal else "---"
+                volts_str = f"{volts.value:.1f}V" if volts else "---"
+                
+                print(f"{time_str:<10} {coolant_str:<10} {rpm_str:<8} {speed_str:<8} {throttle_str:<10} {pedal_str:<8} {volts_str:<8}")
+                
+                time.sleep(_monitor_interval)
+                
+            except ConnectionLostError:
+                handle_disconnection()
+                break
+            except NotConnectedError:
+                print(f"\n  ❌ {t('not_connected')}")
+                break
+            except ScannerError as e:
+                print(f"\n  ❌ {t('error')}: {e}")
+                break
+        
+        print("-" * 70)
+        
+        if logger:
+            summary = logger.end_session()
+            print(f"\n📊 {t('session_summary')}:")
+            print(f"   {t('file')}: {summary.get('file', 'N/A')}")
+            print(f"   {t('duration')}: {summary.get('duration_seconds', 0):.1f} {t('seconds')}")
+            print(f"   {t('readings')}: {summary.get('reading_count', 0)}")
             
-            if logger:
-                logger.log_readings(readings)
-            
-            # Extract values
-            coolant = readings.get("05")
-            rpm = readings.get("0C")
-            speed = readings.get("0D")
-            throttle = readings.get("11")
-            pedal = readings.get("49")
-            volts = readings.get("42")
-            
-            time_str = cr_time_only()
-            coolant_str = f"{coolant.value:.0f}°C" if coolant else "---"
-            rpm_str = f"{rpm.value:.0f}" if rpm else "---"
-            speed_str = f"{speed.value:.0f}km/h" if speed else "---"
-            throttle_str = f"{throttle.value:.1f}%" if throttle else "---"
-            pedal_str = f"{pedal.value:.1f}%" if pedal else "---"
-            volts_str = f"{volts.value:.1f}V" if volts else "---"
-            
-            print(f"{time_str:<10} {coolant_str:<10} {rpm_str:<8} {speed_str:<8} {throttle_str:<10} {pedal_str:<8} {volts_str:<8}")
-            
-            time.sleep(_monitor_interval)
-            
-        except Exception as e:
-            print(f"\n  ❌ {t('error')}: {e}")
-            break
-    
-    print("-" * 70)
-    
-    if logger:
-        summary = logger.end_session()
-        print(f"\n📊 {t('session_summary')}:")
-        print(f"   {t('file')}: {summary.get('file', 'N/A')}")
-        print(f"   {t('duration')}: {summary.get('duration_seconds', 0):.1f} {t('seconds')}")
-        print(f"   {t('readings')}: {summary.get('reading_count', 0)}")
+    finally:
+        # Restore original signal handler
+        if _original_sigint:
+            signal.signal(signal.SIGINT, _original_sigint)
 
 
 def action_freeze_frame():
@@ -342,15 +382,23 @@ def action_freeze_frame():
     print_header(t("freeze_header"))
     print(f"  {t('time')}: {cr_timestamp()}\n")
     
-    freeze = _scanner.read_freeze_frame()
-    
-    if freeze:
-        print(f"  {t('dtc_triggered')}: {freeze.dtc_code}\n")
-        for reading in freeze.readings.values():
-            print(f"  {reading.name}: {reading.value} {reading.unit}")
-    else:
-        print(f"  {t('no_freeze_data')}")
-        print(f"  {t('freeze_tip')}")
+    try:
+        freeze = _scanner.read_freeze_frame()
+        
+        if freeze:
+            print(f"  {t('dtc_triggered')}: {freeze.dtc_code}\n")
+            for reading in freeze.readings.values():
+                print(f"  {reading.name}: {reading.value} {reading.unit}")
+        else:
+            print(f"  {t('no_freeze_data')}")
+            print(f"  {t('freeze_tip')}")
+            
+    except ConnectionLostError:
+        handle_disconnection()
+    except NotConnectedError:
+        print(f"\n  ❌ {t('not_connected')}")
+    except ScannerError as e:
+        print(f"\n  ❌ {t('error')}: {e}")
 
 
 def action_readiness():
@@ -364,34 +412,42 @@ def action_readiness():
     print_header(t("readiness_header"))
     print(f"  {t('time')}: {cr_timestamp()}\n")
     
-    readiness = _scanner.read_readiness()
-    
-    if not readiness:
-        print(f"  ❌ {t('unable_read_readiness')}")
-        return
-    
-    complete = incomplete = na = 0
-    
-    for name, status in readiness.items():
-        if not status.available:
-            emoji = "➖"
-            na += 1
-        elif status.complete:
-            emoji = "✅"
-            complete += 1
-        else:
-            emoji = "❌"
-            incomplete += 1
-        print(f"  {emoji} {name}: {status.status_str}")
-    
-    print(f"\n  {t('summary')}:")
-    print(f"    ✅ {t('complete')}: {complete}")
-    print(f"    ❌ {t('incomplete')}: {incomplete}")
-    print(f"    ➖ {t('not_available')}: {na}")
-    
-    if incomplete > 0:
-        print(f"\n  💡 {t('readiness_tip')}")
-        print(f"     {t('readiness_tip2')}")
+    try:
+        readiness = _scanner.read_readiness()
+        
+        if not readiness:
+            print(f"  ❌ {t('unable_read_readiness')}")
+            return
+        
+        complete = incomplete = na = 0
+        
+        for name, status in readiness.items():
+            if not status.available:
+                emoji = "➖"
+                na += 1
+            elif status.complete:
+                emoji = "✅"
+                complete += 1
+            else:
+                emoji = "❌"
+                incomplete += 1
+            print(f"  {emoji} {name}: {status.status_str}")
+        
+        print(f"\n  {t('summary')}:")
+        print(f"    ✅ {t('complete')}: {complete}")
+        print(f"    ❌ {t('incomplete')}: {incomplete}")
+        print(f"    ➖ {t('not_available')}: {na}")
+        
+        if incomplete > 0:
+            print(f"\n  💡 {t('readiness_tip')}")
+            print(f"     {t('readiness_tip2')}")
+            
+    except ConnectionLostError:
+        handle_disconnection()
+    except NotConnectedError:
+        print(f"\n  ❌ {t('not_connected')}")
+    except ScannerError as e:
+        print(f"\n  ❌ {t('error')}: {e}")
 
 
 def action_clear_codes():
@@ -413,17 +469,22 @@ def action_clear_codes():
     
     # Accept YES in multiple languages
     if confirm in ["YES", "SI", "SÍ", "OUI", "JA", "SIM"]:
-        if _scanner.clear_dtcs():
-            print(f"\n  ✅ {t('clear_success', time=cr_timestamp())}")
-        else:
-            print(f"\n  ❌ {t('clear_failed')}")
+        try:
+            if _scanner.clear_dtcs():
+                print(f"\n  ✅ {t('clear_success', time=cr_timestamp())}")
+            else:
+                print(f"\n  ❌ {t('clear_failed')}")
+        except ConnectionLostError:
+            handle_disconnection()
+        except ScannerError as e:
+            print(f"\n  ❌ {t('error')}: {e}")
     else:
         print(f"\n  {t('cancelled')}")
 
 
 def action_lookup_code():
     """Look up a specific DTC."""
-    global _dtc_db
+    global _dtc_db, _current_manufacturer
     
     if not _dtc_db:
         _dtc_db = DTCDatabase(manufacturer=_current_manufacturer if _current_manufacturer != "generic" else None)
@@ -456,7 +517,7 @@ def action_lookup_code():
 
 def action_search_codes():
     """Search DTC database."""
-    global _dtc_db
+    global _dtc_db, _current_manufacturer
     
     if not _dtc_db:
         _dtc_db = DTCDatabase(manufacturer=_current_manufacturer if _current_manufacturer != "generic" else None)
@@ -515,11 +576,16 @@ def menu_settings():
                 _current_manufacturer = "chrysler"
             elif mfr_choice == "3":
                 _current_manufacturer = "landrover"
+            else:
+                press_enter()
+                continue
             
             # Reload database
             _dtc_db = DTCDatabase(manufacturer=_current_manufacturer if _current_manufacturer != "generic" else None)
             print(f"\n  ✅ {t('set_to', value=_current_manufacturer.capitalize())}")
             print(f"     {t('loaded_codes', count=_dtc_db.count)}")
+            if _dtc_db.loaded_files:
+                print(f"     📁 Files: {', '.join(_dtc_db.loaded_files)}")
             press_enter()
         
         elif choice == "2":
@@ -595,7 +661,9 @@ def run_demo():
     
     # Load database
     _dtc_db = DTCDatabase()
-    print(f"  📚 {t('loaded_codes', count=_dtc_db.count)}\n")
+    print(f"  📚 {t('loaded_codes', count=_dtc_db.count)}")
+    if _dtc_db.loaded_files:
+        print(f"  📁 Files: {', '.join(_dtc_db.loaded_files)}\n")
     
     # Show some example codes
     print(f"  Example codes:\n")
@@ -605,6 +673,8 @@ def run_demo():
         info = _dtc_db.lookup(code)
         if info:
             print(f"    {code}: {info.description}")
+        else:
+            print(f"    {code}: (not found)")
     
     print("\n" + "-" * 60)
     print(f"\n  To use with a real vehicle:")
