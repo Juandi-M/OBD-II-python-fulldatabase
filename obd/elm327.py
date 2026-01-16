@@ -120,7 +120,8 @@ class ELM327:
             # Basic config
             self.send_raw_lines("ATE0", timeout=1.0)  # echo off
             self.send_raw_lines("ATL0", timeout=1.0)  # linefeeds off
-            self.send_raw_lines("ATS0", timeout=1.0)  # spaces off
+            # Spaces ON if headers are ON, because our parser tokenizes by spaces
+            self.send_raw_lines("ATS1" if self.headers_on else "ATS0", timeout=1.0)
 
             # Headers ON for multi-ECU robustness (you can toggle later)
             if self.headers_on:

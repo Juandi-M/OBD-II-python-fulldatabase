@@ -1,10 +1,3 @@
-"""
-OBD-II Scanner
-==============
-High-level scanner interface for vehicle diagnostics.
-Includes robust error handling for disconnections.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,8 +16,8 @@ from .obd_parse import (
     find_obd_response_payload,
     extract_ascii_from_hex_tokens,
     is_valid_vin,
+    strip_isotp_pci_from_payload,
 )
-
 
 class ScannerError(Exception):
     pass
@@ -223,27 +216,36 @@ class OBDScanner:
         dtcs: List[DiagnosticCode] = []
         read_time = cr_now()
 
+        # mode -> (status label, expected response prefix)
+        modes = [
+            ("03", "stored", ["43"]),
+            ("07", "pending", ["47"]),
+            ("0A", "permanent", ["4A"]),
+        ]
+
         try:
-            for mode, status in [("03", "stored"), ("07", "pending"), ("0A", "permanent")]:
-                lines = self._send_obd_lines_retry(mode, retries=1)
-                joined = " ".join(lines).upper()
-
-                if any(err in joined for err in ["NO DATA", "UNABLE TO CONNECT", "ERROR", "?"]):
+            for mode, status, prefix in modes:
+                found = self._obd_query_payload(mode, expected_prefix=prefix)
+                if not found:
                     continue
 
-                # Keep compatibility with parse_dtc_response() but feed it cleaner hex
-                hex_only = "".join(ch for ch in joined if ch in "0123456789ABCDEF")
-                if not hex_only:
+                ecu, payload = found
+
+                # payload starts at prefix (e.g. 43 ...), join to hex string
+                hex_payload = "".join(payload).upper()
+                if not hex_payload:
                     continue
 
-                for code in parse_dtc_response(hex_only, mode):
+                for code in parse_dtc_response(hex_payload, mode):
                     if not any(d.code == code for d in dtcs):
-                        dtcs.append(DiagnosticCode(
-                            code=code,
-                            description=self.dtc_db.get_description(code),
-                            status=status,
-                            timestamp=read_time,
-                        ))
+                        dtcs.append(
+                            DiagnosticCode(
+                                code=code,
+                                description=self.dtc_db.get_description(code),
+                                status=status,
+                                timestamp=read_time,
+                            )
+                        )
 
         except DeviceDisconnectedError:
             self._handle_disconnection()
@@ -282,7 +284,7 @@ class OBDScanner:
         if not found:
             return None
 
-        ecu, payload = found
+        _ecu, payload = found
         if len(payload) < 2:
             return None
 
@@ -488,9 +490,27 @@ class OBDScanner:
             found = self._obd_query_payload("0902", expected_prefix=["49", "02"])
             if found:
                 ecu, payload = found
-                vin_tokens = payload[3:] if len(payload) > 3 else []
+
+                # Expected: 49 02 01 <VIN...> (sometimes with ISO-TP PCI bytes mixed in)
+                cleaned = strip_isotp_pci_from_payload(payload)
+
+                # Prefer to start after 49 02 01 if present
+                vin_tokens: List[str] = []
+                for i in range(0, max(0, len(cleaned) - 3)):
+                    if cleaned[i:i+3] == ["49", "02", "01"]:
+                        vin_tokens = cleaned[i+3:]
+                        break
+                if not vin_tokens:
+                    # fallback: old behavior but with PCI stripped
+                    vin_tokens = cleaned[3:] if len(cleaned) > 3 else []
+
                 vin = extract_ascii_from_hex_tokens(vin_tokens).strip().upper()
                 info["vin_raw"] = "".join(payload)
+
+                # VIN is 17 chars; sometimes extra bytes exist after it
+                if len(vin) >= 17:
+                    vin = vin[:17]
+
                 if is_valid_vin(vin):
                     info["vin"] = vin
 

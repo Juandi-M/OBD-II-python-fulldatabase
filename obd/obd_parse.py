@@ -126,3 +126,40 @@ def extract_ascii_from_hex_tokens(tokens: List[str]) -> str:
 def is_valid_vin(vin: str) -> bool:
     vin = (vin or "").strip().upper()
     return bool(VIN_RE.match(vin))
+
+def strip_isotp_pci_from_payload(payload: List[str]) -> List[str]:
+    """
+    Minimal ISO-TP cleanup:
+    - If payload contains ISO-TP frame markers like 10 xx (first frame) and 21/22/23... (consecutive),
+      remove the PCI byte(s) so they don't turn into ASCII (e.g., 0x21 -> '!').
+
+    This is a minimal Stage-1 cleanup good enough for VIN (09 02) and other long responses.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(payload)
+
+    while i < n:
+        t = payload[i].upper()
+
+        # First Frame: 10 LL ...
+        if t == "10" and (i + 1) < n:
+            # drop "10" and the length byte
+            i += 2
+            continue
+
+        # Consecutive Frame: 21/22/23... 2F
+        if len(t) == 2:
+            try:
+                b = int(t, 16)
+                # 0x21..0x2F are typical consecutive frame indices in ISO-TP
+                if 0x21 <= b <= 0x2F:
+                    i += 1
+                    continue
+            except ValueError:
+                pass
+
+        out.append(t)
+        i += 1
+
+    return out
