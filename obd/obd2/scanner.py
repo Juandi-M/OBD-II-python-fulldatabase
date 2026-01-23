@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from .base import BaseScanner
+from .dtcs import DtcMixin
+from .pid_mixin import PidMixin
+from .readiness import ReadinessMixin
+from .vehicle_info import VehicleInfoMixin
+from .self_test import SelfTestMixin
+
+from ..dtc import DTCDatabase
+
+
+class OBDScanner(
+    BaseScanner,
+    PidMixin,
+    DtcMixin,
+    ReadinessMixin,
+    VehicleInfoMixin,
+    SelfTestMixin,
+):
+    def __init__(self, port: Optional[str] = None, baudrate: int = 38400, manufacturer: Optional[str] = None):
+        super().__init__(port=port, baudrate=baudrate)
+        self.dtc_db = DTCDatabase(manufacturer=manufacturer)
+
+    def set_manufacturer(self, manufacturer: str):
+        self.dtc_db.set_manufacturer(manufacturer)
