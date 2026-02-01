@@ -4,8 +4,9 @@ from __future__ import annotations
 from typing import List
 import serial.tools.list_ports
 
+from obd.bluetooth.ports import is_bluetooth_port_info
 
-def find_ports() -> List[str]:
+def find_ports(include_bluetooth: bool = False) -> List[str]:
     ranked: List[tuple[int, str]] = []
     try:
         ports_list = serial.tools.list_ports.comports()
@@ -15,8 +16,11 @@ def find_ports() -> List[str]:
     for p in ports_list:
         dev = (p.device or "").lower()
         desc = (p.description or "").lower()
+        hwid = (getattr(p, "hwid", "") or "").lower()
 
-        if "bluetooth" in dev or "debug-console" in dev:
+        if "debug-console" in dev:
+            continue
+        if not include_bluetooth and is_bluetooth_port_info(dev, desc, hwid):
             continue
 
         score = 0
@@ -31,6 +35,8 @@ def find_ports() -> List[str]:
 
         if score > 0 and p.device:
             ranked.append((score, p.device))
+        elif include_bluetooth and is_bluetooth_port_info(dev, desc, hwid) and p.device:
+            ranked.append((1, p.device))
 
     ranked.sort(reverse=True)
     return [dev for _, dev in ranked]

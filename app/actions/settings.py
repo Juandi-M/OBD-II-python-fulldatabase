@@ -18,8 +18,9 @@ def settings_menu(state: AppState) -> None:
                 ("2", f"{t('log_format'):<20} [{state.log_format.upper()}]"),
                 ("3", f"{t('monitor_interval'):<20} [{state.monitor_interval}s]"),
                 ("4", t("view_ports")),
-                ("5", f"{t('language'):<20} [{get_language_name(get_language())}]"),
-                ("6", t("paywall_settings")),
+                ("5", t("view_bluetooth_ports")),
+                ("6", f"{t('language'):<20} [{get_language_name(get_language())}]"),
+                ("7", t("paywall_settings")),
                 ("0", t("back")),
             ],
         )
@@ -84,6 +85,15 @@ def settings_menu(state: AppState) -> None:
                 print(f"    {t('no_ports')}")
             press_enter()
         elif choice == "5":
+            print(f"\n  🔵 {t('available_bluetooth_ports')}:\n")
+            ports = ELM327.find_bluetooth_ports()
+            if ports:
+                for port in ports:
+                    print(f"    {port}")
+            else:
+                print(f"    {t('no_ports')}")
+            press_enter()
+        elif choice == "6":
             print(f"\n  {t('select_language')}:\n")
             for code, name in get_available_languages().items():
                 current = " ←" if code == get_language() else ""
@@ -96,7 +106,7 @@ def settings_menu(state: AppState) -> None:
             else:
                 print(f"\n  ❌ {t('invalid_number')}")
             press_enter()
-        elif choice == "6":
+        elif choice == "7":
             paywall_menu()
         elif choice == "0":
             break
