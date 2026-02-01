@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+from obd import OBDScanner, DTCDatabase
+
+
+@dataclass
+class AppState:
+    scanner: Optional[OBDScanner] = None
+    dtc_db: Optional[DTCDatabase] = None
+    manufacturer: str = "generic"
+    log_format: str = "csv"
+    monitor_interval: float = 1.0
+    stop_monitoring: bool = False
+
+    def ensure_scanner(self) -> OBDScanner:
+        if not self.scanner:
+            self.scanner = OBDScanner()
+        return self.scanner
+
+    def ensure_dtc_db(self) -> DTCDatabase:
+        if not self.dtc_db:
+            self.dtc_db = DTCDatabase(manufacturer=self.manufacturer)
+        return self.dtc_db
+
+    def set_manufacturer(self, manufacturer: str) -> None:
+        self.manufacturer = manufacturer
+        if self.dtc_db:
+            self.dtc_db.set_manufacturer(manufacturer)
