@@ -121,7 +121,10 @@ class PaywallClient:
         pending = load_pending_consumptions()
         if not pending:
             return
-        self.ensure_identity()
+        try:
+            self.ensure_identity()
+        except PaywallError:
+            return
         remaining = []
         for item in pending:
             action = item.get("action")
