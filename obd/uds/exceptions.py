@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class UdsError(Exception):
     """Base exception for UDS module."""
 

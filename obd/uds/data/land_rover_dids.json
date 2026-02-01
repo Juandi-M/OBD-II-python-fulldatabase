@@ -3,12 +3,24 @@
     "did": "F190",
     "name": "VIN",
     "decoder": "ascii",
-    "notes": "Generic VIN DID (placeholder)"
+    "notes": "Vehicle Identification Number; standard UDS DID used by many JLR ECUs."
   },
   {
     "did": "F18C",
     "name": "ECU Serial",
     "decoder": "ascii",
-    "notes": "Example DID; confirm per ECU"
+    "notes": "Serial number / unique ID; confirm per ECU and model line."
+  },
+  {
+    "did": "F187",
+    "name": "Software Version",
+    "decoder": "ascii",
+    "notes": "Diagnostic software version string; mapping varies by module."
+  },
+  {
+    "did": "F111",
+    "name": "ECU Hardware Number",
+    "decoder": "ascii",
+    "notes": "Hardware part number; not guaranteed to be present on every module."
   }
 ]

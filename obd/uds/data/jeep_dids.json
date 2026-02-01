@@ -3,12 +3,36 @@
     "did": "F190",
     "name": "VIN",
     "decoder": "ascii",
-    "notes": "Generic VIN DID (placeholder)"
+    "notes": "Vehicle Identification Number; known to work on JL/JT BCM via UDS ReadDataByIdentifier."
+  },
+  {
+    "did": "F132",
+    "name": "ECU Part Number",
+    "decoder": "ascii",
+    "notes": "Jeep part number string; reported by multiple modules (BCM, IPCM, radio, etc.)."
   },
   {
     "did": "F187",
     "name": "Software Version",
     "decoder": "ascii",
-    "notes": "Example DID; confirm per ECU"
+    "notes": "Example software version string; confirm per ECU/model."
+  },
+  {
+    "did": "F18C",
+    "name": "ECU Serial",
+    "decoder": "ascii",
+    "notes": "Serial number / unique ID; usage depends on module."
+  },
+  {
+    "did": "F111",
+    "name": "ECU Hardware Number",
+    "decoder": "ascii",
+    "notes": "Hardware part number; generic UDS-style identifier, may not be implemented on all ECUs."
+  },
+  {
+    "did": "A03B",
+    "name": "Steering Wheel Temperature Raw",
+    "decoder": "uint",
+    "notes": "BCM DID; first byte gives steering wheel temperature. Celsius ~= (value / 2) - 40 on vehicles with heated wheel."
   }
 ]

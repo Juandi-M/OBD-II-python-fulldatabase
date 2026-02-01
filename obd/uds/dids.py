@@ -29,10 +29,12 @@ def did_map(brand: str) -> Dict[str, Dict[str, Any]]:
 
 
 def find_did(brand: str, did: str) -> Optional[Dict[str, Any]]:
+    """Find DID metadata by numeric DID string (e.g. 'F190')."""
     return did_map(brand).get(did.upper())
 
 
 def find_did_by_name(brand: str, name: str) -> Optional[Dict[str, Any]]:
+    """Find DID metadata by logical name (case-insensitive)."""
     target = (name or "").strip().lower()
     for entry in load_brand_dids(brand):
         if (entry.get("name") or "").strip().lower() == target:

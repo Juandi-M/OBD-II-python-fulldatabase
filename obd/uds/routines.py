@@ -29,4 +29,5 @@ def routine_map(brand: str) -> Dict[str, Dict[str, Any]]:
 
 
 def find_routine(brand: str, name: str) -> Optional[Dict[str, Any]]:
-    return routine_map(brand).get(name.lower())
+    """Find routine definition by logical name (e.g. 'open_calipers')."""
+    return routine_map(brand).get((name or "").lower())

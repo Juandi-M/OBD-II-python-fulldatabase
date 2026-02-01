@@ -4,6 +4,6 @@
     "tx_id": "",
     "rx_id": "",
     "status": "placeholder",
-    "notes": "Populate with real CAN IDs after reverse engineering"
+    "notes": "Body Control Module; fill tx_id/rx_id with actual Land Rover CAN IDs for your platform (e.g. Discovery 5 / Defender) once captured."
   }
 ]

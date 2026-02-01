@@ -2,11 +2,19 @@
   {
     "name": "service_mode",
     "routine_id": "FF00",
-    "description": "Placeholder for service mode; validate routine ID per ECU"
+    "description": "Enter generic service/maintenance mode (placeholder ID, replace with real value after reverse engineering).",
+    "status": "placeholder"
   },
   {
     "name": "open_calipers",
     "routine_id": "FF01",
-    "description": "Placeholder for EPB/Caliper service mode"
+    "description": "EPB / rear caliper service position for brake work (placeholder ID, replace with real value).",
+    "status": "placeholder"
+  },
+  {
+    "name": "reset_oil_service",
+    "routine_id": "FF10",
+    "description": "Reset oil / service reminder counter (placeholder ID; use traces from JScan or dealer tool to determine actual routine).",
+    "status": "placeholder"
   }
 ]

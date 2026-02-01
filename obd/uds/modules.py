@@ -11,8 +11,8 @@ BRAND_FILES = {
     "land_rover": "land_rover_modules.json",
 }
 
-# NOTE: STANDARD_MODULES are generic diagnostic IDs used by many ECUs.
-# Brand files still require reverse engineering to confirm module mappings.
+# STANDARD_MODULES are generic diagnostic IDs used by many ECUs.
+# Brand files still require reverse engineering to confirm specific module mappings.
 STANDARD_MODULES = [
     {
         "name": "generic_engine",
@@ -53,4 +53,5 @@ def module_map(brand: str, include_standard: bool = True) -> Dict[str, Dict[str,
 
 
 def find_module(brand: str, name: str) -> Optional[Dict[str, Any]]:
+    """Find module definition by logical name (e.g. 'generic_engine', 'bcm')."""
     return module_map(brand).get((name or "").lower())

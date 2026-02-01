@@ -1,9 +1,122 @@
 [
   {
     "name": "bcm",
-    "tx_id": "",
-    "rx_id": "",
-    "status": "placeholder",
-    "notes": "Populate with real CAN IDs after reverse engineering"
+    "tx_id": "620",
+    "rx_id": "504",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Body Control Module on CAN-C for Wrangler JL / Gladiator JT."
+  },
+  {
+    "name": "rf",
+    "tx_id": "740",
+    "rx_id": "4C0",
+    "bus": "can1",
+    "status": "unconfirmed",
+    "notes": "RF hub / keyless module; mapping taken from community reverse engineering, verify on your vehicle."
+  },
+  {
+    "name": "ipcm",
+    "tx_id": "742",
+    "rx_id": "4C2",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Instrument Panel Cluster Module (cluster)."
+  },
+  {
+    "name": "evic",
+    "tx_id": "742",
+    "rx_id": "4C2",
+    "bus": "can1",
+    "status": "alias",
+    "notes": "Alias for IPCM / EVIC display; shares CAN IDs with ipcm."
+  },
+  {
+    "name": "airbag",
+    "tx_id": "744",
+    "rx_id": "4C4",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Occupant restraint / airbag module; be careful with this."
+  },
+  {
+    "name": "shift",
+    "tx_id": "749",
+    "rx_id": "4C9",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Electronic shifter module."
+  },
+  {
+    "name": "tcase",
+    "tx_id": "74B",
+    "rx_id": "4CB",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Transfer case control module (T-case)."
+  },
+  {
+    "name": "pcm",
+    "tx_id": "75A",
+    "rx_id": "4DA",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Powertrain control module (engine)."
+  },
+  {
+    "name": "scm",
+    "tx_id": "763",
+    "rx_id": "4E3",
+    "bus": "can1",
+    "status": "confirmed",
+    "notes": "Steering column module."
+  },
+  {
+    "name": "hvac",
+    "tx_id": "783",
+    "rx_id": "503",
+    "bus": "can0",
+    "status": "confirmed",
+    "notes": "Heating/ventilation/AC module."
+  },
+  {
+    "name": "cscm",
+    "tx_id": "7BC",
+    "rx_id": "53C",
+    "bus": "can0",
+    "status": "unconfirmed",
+    "notes": "Center console / switchbank control; mapping from community traces."
+  },
+  {
+    "name": "radio",
+    "tx_id": "7BF",
+    "rx_id": "53F",
+    "bus": "can0",
+    "status": "confirmed",
+    "notes": "Uconnect radio module."
+  },
+  {
+    "name": "unknown1",
+    "tx_id": "792",
+    "rx_id": "512",
+    "bus": "can1",
+    "status": "unknown",
+    "notes": "Unidentified ECU; discovered in traces, purpose not confirmed."
+  },
+  {
+    "name": "unknown2",
+    "tx_id": "7E0",
+    "rx_id": "7E8",
+    "bus": "can1",
+    "status": "generic",
+    "notes": "Generic powertrain diagnostic pair; often engine ECU via standard OBD-II."
+  },
+  {
+    "name": "unknown3",
+    "tx_id": "7BE",
+    "rx_id": "53E",
+    "bus": "can1",
+    "status": "unknown",
+    "notes": "Unidentified ECU; mapping copied from community examples, confirm before use."
   }
 ]

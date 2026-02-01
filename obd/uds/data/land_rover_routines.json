@@ -2,11 +2,19 @@
   {
     "name": "service_mode",
     "routine_id": "FF00",
-    "description": "Placeholder for service mode; validate routine ID per ECU"
+    "description": "Generic service mode / maintenance mode (placeholder, platform-specific on JLR).",
+    "status": "placeholder"
   },
   {
     "name": "open_calipers",
     "routine_id": "FF01",
-    "description": "Placeholder for EPB/Caliper service mode"
+    "description": "EPB / rear caliper service routine for pad replacement (placeholder, confirm with traces).",
+    "status": "placeholder"
+  },
+  {
+    "name": "reset_oil_service",
+    "routine_id": "FF10",
+    "description": "Reset oil/service reminder; ID is placeholder and must be replaced per model/ECU.",
+    "status": "placeholder"
   }
 ]
