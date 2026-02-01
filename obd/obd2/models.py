@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
 from ..utils import cr_now
 
@@ -10,10 +10,11 @@ from ..utils import cr_now
 @dataclass
 class SensorReading:
     name: str
-    value: float
+    value: Optional[float]
     unit: str
     pid: str
     raw_hex: str
+    ecu: Optional[str] = None
     timestamp: datetime = field(default_factory=cr_now)
 
     @property

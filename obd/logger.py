@@ -201,10 +201,42 @@ class SessionLogger:
             self._csv_writer.writeheader()
             self._headers_written = True
         
-        for key in row.keys():
-            if key not in self._csv_fieldnames:
-                self._csv_fieldnames.append(key)
-        
+        new_fields = [key for key in row.keys() if key not in self._csv_fieldnames]
+        if new_fields:
+            self._rewrite_csv_with_new_fields(new_fields, row)
+            return
+
+        self._csv_writer.writerow(row)
+        self._file_handle.flush()
+
+    def _rewrite_csv_with_new_fields(self, new_fields: List[str], row: Dict) -> None:
+        if not self.session_file or not self._file_handle:
+            return
+
+        # Flush and close so we can read the file contents.
+        self._file_handle.flush()
+        self._file_handle.close()
+
+        updated_fields = self._csv_fieldnames + [f for f in new_fields if f not in self._csv_fieldnames]
+        existing_rows: List[Dict[str, Any]] = []
+        try:
+            with open(self.session_file, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                existing_rows.extend(reader)
+        except FileNotFoundError:
+            existing_rows = []
+
+        self._file_handle = open(self.session_file, "w", newline="", encoding="utf-8")
+        self._csv_fieldnames = updated_fields
+        self._csv_writer = csv.DictWriter(
+            self._file_handle,
+            fieldnames=self._csv_fieldnames,
+            extrasaction="ignore",
+        )
+        self._csv_writer.writeheader()
+
+        for old_row in existing_rows:
+            self._csv_writer.writerow(old_row)
         self._csv_writer.writerow(row)
         self._file_handle.flush()
     

@@ -140,8 +140,8 @@ obd2-scanner/
 ├── README.md
 ├── data/
 │   ├── dtc_generic.csv          # Generic OBD-II codes (3,000+)
-│   ├── dtc_jeep_dodge_Chrysler.csv  # Chrysler/Jeep/Dodge specific
-│   ├── dtc_landrover.csv        # Land Rover/Jaguar specific
+│   ├── dtc_jeep_dodge_chrysler.csv  # Chrysler/Jeep/Dodge specific
+│   ├── dtc_land_rover.csv       # Land Rover/Jaguar specific
 │   ├── i18n/                    # CLI language packs
 │   ├── paywall.json             # Paywall configuration
 │   ├── reports/                 # Saved AI reports
@@ -151,10 +151,10 @@ obd2-scanner/
 ├── openai/                  # OpenAI and Stripe integrations
 └── obd/
     ├── __init__.py          # Package exports
-    ├── elm327.py            # ELM327 adapter communication
-    ├── scanner.py           # High-level scanner interface
-    ├── dtc.py               # DTC decoding and database lookup
-    ├── pids.py              # OBD-II PID definitions
+    ├── elm/elm327.py        # ELM327 adapter communication
+    ├── obd2/scanner.py      # High-level scanner interface
+    ├── dtc/database.py      # DTC decoding and database lookup
+    ├── pids/standard_mode01.py  # OBD-II PID definitions
     ├── logger.py            # Session logging (CSV/JSON)
     └── utils.py             # Shared utilities
 ```
