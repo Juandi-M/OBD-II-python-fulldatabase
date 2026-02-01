@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from obd import OBDScanner, DTCDatabase
+from obd.legacy_kline.adapter import LegacyKLineAdapter
 
 
 @dataclass
 class AppState:
     scanner: Optional[OBDScanner] = None
     dtc_db: Optional[DTCDatabase] = None
+    legacy_scanner: Optional[LegacyKLineAdapter] = None
     manufacturer: str = "generic"
     log_format: str = "csv"
     monitor_interval: float = 1.0
@@ -24,6 +26,27 @@ class AppState:
             )
         return self.scanner
 
+    def set_legacy_scanner(self, legacy: LegacyKLineAdapter) -> None:
+        if self.scanner and self.scanner.is_connected:
+            self.scanner.disconnect()
+        self.legacy_scanner = legacy
+
+    def clear_legacy_scanner(self) -> None:
+        if self.legacy_scanner:
+            try:
+                self.legacy_scanner.disconnect()
+            except Exception:
+                pass
+        self.legacy_scanner = None
+
+    def disconnect_all(self) -> None:
+        if self.scanner and self.scanner.is_connected:
+            try:
+                self.scanner.disconnect()
+            except Exception:
+                pass
+        self.clear_legacy_scanner()
+
     def ensure_dtc_db(self) -> DTCDatabase:
         if not self.dtc_db:
             self.dtc_db = DTCDatabase(
@@ -37,3 +60,12 @@ class AppState:
             self.dtc_db.set_manufacturer(manufacturer)
         if self.scanner:
             self.scanner.set_manufacturer(manufacturer)
+        if self.legacy_scanner:
+            self.legacy_scanner.set_manufacturer(manufacturer)
+
+    def active_scanner(self) -> Optional[Union[OBDScanner, LegacyKLineAdapter]]:
+        if self.legacy_scanner and self.legacy_scanner.is_connected:
+            return self.legacy_scanner
+        if self.scanner and self.scanner.is_connected:
+            return self.scanner
+        return None

@@ -19,7 +19,7 @@ def _signal_handler(sig, frame, state: AppState) -> None:
 
 
 def live_monitor(state: AppState) -> None:
-    scanner = require_connected_scanner(state.scanner)
+    scanner = require_connected_scanner(state)
     if not scanner:
         return
 

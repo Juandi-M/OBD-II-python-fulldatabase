@@ -10,7 +10,7 @@ from app.ui import print_header, print_subheader, handle_disconnection
 
 
 def run_full_scan(state: AppState) -> None:
-    scanner = require_connected_scanner(state.scanner)
+    scanner = require_connected_scanner(state)
     if not scanner:
         return
 

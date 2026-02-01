@@ -12,6 +12,7 @@ from .config.verify import verify_profile
 from .config.detect import detect_profile, detect_profile_report
 from .session import LegacyKLineSession
 from .scanner import LegacyKLineScanner
+from .adapter import LegacyKLineAdapter
 
 __all__ = [
     "KLineProfile",
@@ -22,4 +23,5 @@ __all__ = [
     "detect_profile_report",
     "LegacyKLineSession",
     "LegacyKLineScanner",
+    "LegacyKLineAdapter",
 ]

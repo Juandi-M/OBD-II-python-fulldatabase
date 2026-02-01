@@ -56,7 +56,7 @@ def run_ai_report(state: AppState) -> None:
             print(f"\n  ❌ {t('paywall_not_configured')}")
             return
 
-    scanner = require_connected_scanner(state.scanner)
+    scanner = require_connected_scanner(state)
     if not scanner:
         return
 

@@ -10,7 +10,7 @@ from app.ui import handle_disconnection, print_header
 
 
 def clear_codes(state: AppState) -> None:
-    scanner = require_connected_scanner(state.scanner)
+    scanner = require_connected_scanner(state)
     if not scanner:
         return
 

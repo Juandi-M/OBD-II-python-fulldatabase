@@ -131,8 +131,8 @@ def main_menu(state: AppState) -> None:
         elif choice == "S":
             settings_menu(state)
         elif choice == "0":
-            if state.scanner and state.scanner.is_connected:
-                state.scanner.disconnect()
+            if state.active_scanner():
+                state.disconnect_all()
                 print(f"\n  🔌 {t('disconnected_at', time=cr_timestamp())}")
             print(f"\n  👋 {t('goodbye')}\n")
             break
