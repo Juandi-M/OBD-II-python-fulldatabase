@@ -62,62 +62,6 @@ class UdsClient:
 
         return response
 
-    def _expect_prefix(self, response: bytes, prefixes: list[bytes]) -> None:
-        for prefix in prefixes:
-            if response.startswith(prefix):
-                return
-        expected = ", ".join(p.hex().upper() for p in prefixes)
-        raise UdsResponseError(f"Unexpected response prefix (expected one of: {expected})")
-
-    def diagnostic_session(self, session_type: int = 0x03) -> Dict[str, Any]:
-        """
-        Enter diagnostic session (0x10).
-        session_type 0x03 = extended session (common for service actions).
-        """
-        response = self._send_and_expect(0x10, bytes([session_type]))
-        return {"session": session_type, "response": response.hex().upper()}
-
-    def tester_present(self, subfunction: int = 0x00) -> Dict[str, Any]:
-        """
-        Keep session alive (0x3E). Some ECUs require this during long routines.
-        """
-        response = self._send_and_expect(0x3E, bytes([subfunction]))
-        return {"response": response.hex().upper()}
-
-    def ecu_reset(self, reset_type: int = 0x01) -> Dict[str, Any]:
-        """
-        ECU reset (0x11). reset_type 0x01 = hard reset, 0x03 = soft reset.
-        """
-        response = self._send_and_expect(0x11, bytes([reset_type]))
-        return {"reset_type": reset_type, "response": response.hex().upper()}
-
-    def clear_dtc(self, group: bytes = b"\xFF\xFF\xFF") -> Dict[str, Any]:
-        """
-        Clear DTCs (0x14). group defaults to all groups (0xFFFFFF).
-        """
-        response = self._send_and_expect(0x14, group)
-        return {"response": response.hex().upper()}
-
-    def security_access(self, level: int, key: bytes) -> Dict[str, Any]:
-        """
-        Security access (0x27).
-        NOTE: Seed/key algorithm is OEM-specific and must be implemented per brand.
-        """
-        response = self._send_and_expect(0x27, bytes([level]) + key)
-        return {"response": response.hex().upper()}
-
-    def write_data_by_identifier(self, did: str | int, data: bytes) -> Dict[str, Any]:
-        """
-        WriteDataByIdentifier (0x2E).
-        NOTE: Use only with known-good DIDs and payloads from reverse engineering.
-        """
-        did_bytes = _to_did_bytes(did)
-        request = did_bytes + data
-        response = self._send_and_expect(0x2E, request)
-        expected_prefix = bytes([0x6E]) + did_bytes
-        self._expect_prefix(response, [expected_prefix])
-        return {"did": did_bytes.hex().upper(), "response": response.hex().upper()}
-
     def read_did(self, brand: str, did: str | int) -> Dict[str, Any]:
         entry = find_did(brand, f"{int(did):04X}" if isinstance(did, int) else did)
         did_bytes = _to_did_bytes(did)

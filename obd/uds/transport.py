@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from ..elm import ELM327, CommunicationError, DeviceDisconnectedError
-from ..protocol import group_by_ecu, merge_payloads, strip_isotp_pci_from_payload
+from ..protocol import group_by_ecu, merge_payloads
 from .exceptions import UdsTransportError
 
 
@@ -56,10 +56,6 @@ class UdsTransport:
             raise UdsTransportError(str(exc))
 
     def send(self, payload: bytes, timeout: Optional[float] = None) -> bytes:
-        """
-        NOTE: This is a minimal transport. Multi-frame ISO-TP handling will need
-        tighter validation when adding brand-specific routines and long DIDs.
-        """
         try:
             lines = self.elm.send_raw_lines(_hex_bytes(payload), timeout=timeout)
         except (CommunicationError, DeviceDisconnectedError) as exc:
@@ -73,5 +69,4 @@ class UdsTransport:
         else:
             tokens = merged.get("NOHDR") or next(iter(merged.values()), [])
 
-        cleaned = strip_isotp_pci_from_payload(tokens)
-        return _tokens_to_bytes(cleaned)
+        return _tokens_to_bytes(tokens)

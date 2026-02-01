@@ -3,14 +3,12 @@
     "did": "F190",
     "name": "VIN",
     "decoder": "ascii",
-    "status": "placeholder",
-    "notes": "Generic VIN DID; confirm per ECU"
+    "notes": "Generic VIN DID (placeholder)"
   },
   {
     "did": "F187",
-    "name": "Spare Part Number",
+    "name": "Software Version",
     "decoder": "ascii",
-    "status": "placeholder",
-    "notes": "Confirm per ECU during reverse engineering"
+    "notes": "Example DID; confirm per ECU"
   }
 ]

@@ -11,20 +11,6 @@ BRAND_FILES = {
     "land_rover": "land_rover_dids.json",
 }
 
-# NOTE: STANDARD_DIDS are generally supported across many ECUs.
-# Brand files still need reverse engineering to confirm extra IDs.
-STANDARD_DIDS = [
-    {"did": "F180", "name": "Boot Software ID", "decoder": "ascii"},
-    {"did": "F187", "name": "Spare Part Number", "decoder": "ascii"},
-    {"did": "F188", "name": "ECU Software Number", "decoder": "ascii"},
-    {"did": "F189", "name": "ECU Software Version", "decoder": "ascii"},
-    {"did": "F18B", "name": "Manufacturing Date", "decoder": "ascii"},
-    {"did": "F18C", "name": "ECU Serial", "decoder": "ascii"},
-    {"did": "F190", "name": "VIN", "decoder": "ascii"},
-    {"did": "F194", "name": "ECU Hardware Number", "decoder": "ascii"},
-    {"did": "F195", "name": "ECU Hardware Version", "decoder": "ascii"},
-]
-
 
 def load_brand_dids(brand: str) -> List[Dict[str, Any]]:
     key = (brand or "").lower()
@@ -37,15 +23,8 @@ def load_brand_dids(brand: str) -> List[Dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_standard_dids() -> List[Dict[str, Any]]:
-    return list(STANDARD_DIDS)
-
-
-def did_map(brand: str, include_standard: bool = True) -> Dict[str, Dict[str, Any]]:
-    entries = []
-    if include_standard:
-        entries.extend(load_standard_dids())
-    entries.extend(load_brand_dids(brand))
+def did_map(brand: str) -> Dict[str, Dict[str, Any]]:
+    entries = load_brand_dids(brand)
     return {entry["did"].upper(): entry for entry in entries if "did" in entry}
 
 
@@ -55,7 +34,7 @@ def find_did(brand: str, did: str) -> Optional[Dict[str, Any]]:
 
 def find_did_by_name(brand: str, name: str) -> Optional[Dict[str, Any]]:
     target = (name or "").strip().lower()
-    for entry in load_standard_dids() + load_brand_dids(brand):
+    for entry in load_brand_dids(brand):
         if (entry.get("name") or "").strip().lower() == target:
             return entry
     return None

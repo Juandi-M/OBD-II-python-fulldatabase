@@ -8,7 +8,6 @@ from .exceptions import (
     UdsResponseError,
     UdsNegativeResponse,
 )
-from .modules import find_module, load_brand_modules, load_standard_modules
 
 __all__ = [
     "UdsClient",
@@ -17,7 +16,4 @@ __all__ = [
     "UdsTransportError",
     "UdsResponseError",
     "UdsNegativeResponse",
-    "find_module",
-    "load_brand_modules",
-    "load_standard_modules",
 ]
