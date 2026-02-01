@@ -46,8 +46,14 @@ class ELM327:
             return False
 
     @staticmethod
-    def find_ports() -> List[str]:
-        return find_ports()
+    def find_ports(include_bluetooth: bool = False) -> List[str]:
+        return find_ports(include_bluetooth=include_bluetooth)
+
+    @staticmethod
+    def find_bluetooth_ports() -> List[str]:
+        from obd.bluetooth.ports import find_bluetooth_ports
+
+        return find_bluetooth_ports()
 
     def connect(self) -> bool:
         if not self.port:

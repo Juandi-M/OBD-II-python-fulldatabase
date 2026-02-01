@@ -28,9 +28,13 @@ def connect_vehicle(state: AppState) -> None:
     print(f"\n🔍 {t('searching_adapter')}")
     ports = ELM327.find_ports()
     if not ports:
-        print(f"\n  ❌ {t('no_ports_found')}")
-        print(f"  💡 {t('adapter_tip')}")
-        return
+        bt_ports = ELM327.find_bluetooth_ports()
+        if not bt_ports:
+            print(f"\n  ❌ {t('no_ports_found')}")
+            print(f"  💡 {t('adapter_tip')}")
+            return
+        print(f"\n  🔵 {t('bluetooth_ports_found', count=len(bt_ports))}")
+        ports = bt_ports
 
     print(f"  {t('found_ports', count=len(ports))}")
 
