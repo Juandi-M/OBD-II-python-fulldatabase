@@ -6,7 +6,14 @@ from app.i18n import t
 from app.ui import clear_screen, press_enter, print_header, print_menu
 
 from .client import PaywallClient, PaywallError, PaymentRequired
-from .config import get_api_base, set_api_base, get_identity, reset_identity
+from .config import (
+    get_api_base,
+    set_api_base,
+    get_identity,
+    load_balance,
+    pending_total,
+    reset_identity,
+)
 
 
 def paywall_menu() -> None:
@@ -15,12 +22,18 @@ def paywall_menu() -> None:
         identity = get_identity()
         api_base = get_api_base() or "-"
         subject_id = _short_id(identity.subject_id) if identity.subject_id else "-"
+        cached = load_balance()
+        pending = pending_total()
+        cached_summary = "-"
+        if cached:
+            cached_summary = f"{cached[0]}/{cached[1]}"
+        balance_label = f"{t('paywall_balance')} ({t('paywall_cached')}: {cached_summary}, {t('paywall_pending')}: {pending})"
         print_menu(
             t("paywall_menu"),
             [
                 ("1", f"{t('paywall_api_base')}: {api_base}"),
                 ("2", f"{t('paywall_subject_id')}: {subject_id}"),
-                ("3", t("paywall_balance")),
+                ("3", balance_label),
                 ("4", t("paywall_checkout")),
                 ("5", t("paywall_reset_identity")),
                 ("0", t("back")),
@@ -76,13 +89,28 @@ def _show_balance() -> None:
     client = PaywallClient()
     if not client.is_configured:
         print(f"\n  {t('paywall_not_configured')}")
+        cached = load_balance()
+        pending = pending_total()
+        if cached:
+            print(f"  {t('paywall_cached')}: {cached[0]} / {cached[1]}")
+        print(f"  {t('paywall_pending')}: {pending}")
         press_enter()
         return
     try:
+        cached_before = load_balance()
+        pending_before = pending_total()
+        client.sync_pending()
         balance = client.get_balance()
         print(f"\n  {t('paywall_balance')}:")
         print(f"    {t('paywall_free_remaining')}: {balance.free_remaining}")
         print(f"    {t('paywall_paid_credits')}: {balance.paid_credits}")
+        print(f"    {t('paywall_pending')}: {pending_total()}")
+        if cached_before:
+            cached_total = cached_before[0] + cached_before[1]
+            expected_total = cached_total + pending_before
+            server_total = balance.free_remaining + balance.paid_credits
+            if server_total != expected_total:
+                print(f"\n  {t('paywall_discrepancy')}")
     except PaywallError as exc:
         print(f"\n  {t('paywall_error')}: {exc}")
     press_enter()

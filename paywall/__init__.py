@@ -5,6 +5,9 @@ from .config import (
     get_identity,
     reset_identity,
     is_bypass_enabled,
+    is_offline_enabled,
+    load_pending_consumptions,
+    pending_total,
 )
 
 __all__ = [
@@ -16,4 +19,7 @@ __all__ = [
     "get_identity",
     "reset_identity",
     "is_bypass_enabled",
+    "is_offline_enabled",
+    "load_pending_consumptions",
+    "pending_total",
 ]

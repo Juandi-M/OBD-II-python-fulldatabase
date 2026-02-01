@@ -9,12 +9,16 @@ from typing import Any, Dict, Optional
 
 from .config import (
     PaywallIdentity,
+    add_pending_consumption,
     ensure_device_id,
     get_api_base,
     get_identity,
+    is_offline_enabled,
     load_balance,
+    load_pending_consumptions,
     reset_identity,
     save_balance,
+    save_pending_consumptions,
     update_identity,
 )
 
@@ -68,13 +72,19 @@ class PaywallClient:
         return True
 
     def consume(self, action: str, cost: int = 1) -> PaywallBalance:
+        self.sync_pending()
         self.ensure_identity()
         payload = {
             "subject_id": self._identity.subject_id,
             "action": action,
             "cost": cost,
         }
-        data = self._request_json("POST", "/v1/credits/consume", payload, use_auth=True)
+        try:
+            data = self._request_json("POST", "/v1/credits/consume", payload, use_auth=True)
+        except PaywallError as exc:
+            if exc.status_code is None and is_offline_enabled():
+                return self._offline_consume(action, cost)
+            raise
         balance = _parse_balance(data)
         if balance:
             save_balance(balance.free_remaining, balance.paid_credits)
@@ -105,6 +115,64 @@ class PaywallClient:
         save_balance(balance.free_remaining, balance.paid_credits)
         return balance
 
+    def sync_pending(self) -> None:
+        if not self.is_configured:
+            return
+        pending = load_pending_consumptions()
+        if not pending:
+            return
+        self.ensure_identity()
+        remaining = []
+        for item in pending:
+            action = item.get("action")
+            cost = item.get("cost")
+            request_id = item.get("id")
+            if not isinstance(action, str) or not isinstance(cost, int) or not request_id:
+                continue
+            payload = {
+                "subject_id": self._identity.subject_id,
+                "action": action,
+                "cost": cost,
+                "request_id": request_id,
+            }
+            try:
+                data = self._request_json(
+                    "POST",
+                    "/v1/credits/consume",
+                    payload,
+                    use_auth=True,
+                    extra_headers={"Idempotency-Key": str(request_id)},
+                )
+            except PaywallError as exc:
+                remaining.append(item)
+                if exc.status_code is None:
+                    break
+                continue
+            balance = _parse_balance(data)
+            if balance:
+                save_balance(balance.free_remaining, balance.paid_credits)
+        save_pending_consumptions(remaining)
+
+    def _offline_consume(self, action: str, cost: int) -> PaywallBalance:
+        cached = load_balance()
+        if not cached:
+            raise PaymentRequired("No cached credits available for offline use.")
+        free_remaining, paid_credits = cached
+        total = free_remaining + paid_credits
+        if total < cost:
+            raise PaymentRequired("Insufficient cached credits for offline use.")
+
+        remaining_cost = cost
+        use_free = min(free_remaining, remaining_cost)
+        free_remaining -= use_free
+        remaining_cost -= use_free
+        if remaining_cost > 0:
+            paid_credits -= remaining_cost
+
+        add_pending_consumption(action, cost)
+        save_balance(free_remaining, paid_credits)
+        return PaywallBalance(free_remaining, paid_credits)
+
     def wait_for_balance(
         self,
         *,
@@ -128,6 +196,8 @@ class PaywallClient:
         payload: Optional[Dict[str, Any]],
         *,
         use_auth: bool,
+        retry_auth: bool = True,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         if not self.is_configured:
             raise PaywallError("Paywall API base URL not configured")
@@ -141,6 +211,8 @@ class PaywallClient:
             body = json.dumps(payload).encode("utf-8")
         if use_auth and self._identity.access_token:
             headers["Authorization"] = f"Bearer {self._identity.access_token}"
+        if extra_headers:
+            headers.update(extra_headers)
 
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
@@ -153,6 +225,15 @@ class PaywallClient:
             if status == 401:
                 reset_identity()
                 self._identity = get_identity()
+                if use_auth and retry_auth:
+                    self.ensure_identity()
+                    return self._request_json(
+                        method,
+                        path,
+                        payload,
+                        use_auth=use_auth,
+                        retry_auth=False,
+                    )
             if status == 402:
                 raise PaymentRequired(message, status_code=status)
             raise PaywallError(message, status_code=status)

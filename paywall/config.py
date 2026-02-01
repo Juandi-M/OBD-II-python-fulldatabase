@@ -4,8 +4,9 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 CONFIG_DIR = Path.home() / ".obdapp"
@@ -128,10 +129,54 @@ def load_balance() -> Optional[Tuple[int, int]]:
     return None
 
 
+def load_pending_consumptions() -> List[Dict[str, Any]]:
+    config = load_config()
+    section = _get_paywall_section(config)
+    pending = section.get("pending_consumptions")
+    if isinstance(pending, list):
+        return [item for item in pending if isinstance(item, dict)]
+    return []
+
+
+def save_pending_consumptions(pending: List[Dict[str, Any]]) -> None:
+    config = load_config()
+    section = _get_paywall_section(config)
+    section["pending_consumptions"] = pending
+    save_config(config)
+
+
+def add_pending_consumption(action: str, cost: int) -> str:
+    pending = load_pending_consumptions()
+    item_id = str(uuid.uuid4())
+    pending.append(
+        {
+            "id": item_id,
+            "action": action,
+            "cost": int(cost),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    save_pending_consumptions(pending)
+    return item_id
+
+
+def pending_total() -> int:
+    total = 0
+    for item in load_pending_consumptions():
+        cost = item.get("cost")
+        if isinstance(cost, int):
+            total += cost
+    return total
+
+
 def is_bypass_enabled() -> bool:
     return _is_truthy(os.environ.get("OBD_SUPERUSER")) or _is_truthy(
         os.environ.get("PAYWALL_BYPASS")
     )
+
+
+def is_offline_enabled() -> bool:
+    return _is_truthy(os.environ.get("PAYWALL_OFFLINE"))
 
 
 def _is_truthy(value: Optional[str]) -> bool:
