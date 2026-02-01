@@ -3,6 +3,10 @@ from __future__ import annotations
 from obd import ELM327
 from obd.obd2.base import ConnectionLostError
 from obd.utils import cr_timestamp
+from obd.legacy_kline.adapter import LegacyKLineAdapter
+from obd.legacy_kline.session import LegacyKLineSession
+from obd.legacy_kline.profiles import ISO9141_2, KWP2000_5BAUD, KWP2000_FAST, td5_candidates
+from obd.legacy_kline.config.errors import KLineDetectError
 
 from app.i18n import t
 from app.state import AppState
@@ -14,12 +18,12 @@ def connect_vehicle(state: AppState) -> None:
     print(f"  {t('time')}: {cr_timestamp()}")
 
     scanner = state.ensure_scanner()
-    if scanner.is_connected:
+    if state.active_scanner():
         print(f"\n  ⚠️  {t('already_connected')}")
         confirm = input(f"  {t('disconnect_reconnect')} (y/n): ").strip().lower()
         if confirm not in ["y", "s"]:
             return
-        scanner.disconnect()
+        state.disconnect_all()
 
     print(f"\n🔍 {t('searching_adapter')}")
     ports = ELM327.find_ports()
@@ -36,6 +40,7 @@ def connect_vehicle(state: AppState) -> None:
             scanner.elm.port = port
             scanner.connect()
             print(f"  ✅ {t('connected_on', port=port)}")
+            state.clear_legacy_scanner()
 
             try:
                 info = scanner.get_vehicle_info()
@@ -54,14 +59,53 @@ def connect_vehicle(state: AppState) -> None:
             except Exception:
                 pass
 
+            if _try_kline(state, port):
+                return
+
     print(f"\n  ❌ {t('no_vehicle_response')}")
     print(f"  💡 {t('adapter_tip')}")
 
 
 def disconnect_vehicle(state: AppState) -> None:
-    scanner = state.scanner
-    if not scanner or not scanner.is_connected:
+    if not state.active_scanner():
         print(f"\n  ⚠️  {t('disconnected')}")
         return
-    scanner.disconnect()
+    state.disconnect_all()
     print(f"\n  🔌 {t('disconnected_at', time=cr_timestamp())}")
+
+
+def _try_kline(state: AppState, port: str) -> bool:
+    print(f"\n  ⚙️  {t('kline_trying')}")
+    try:
+        elm = ELM327(port=port)
+        elm.connect()
+    except Exception:
+        return False
+
+    candidates = [KWP2000_5BAUD, KWP2000_FAST, ISO9141_2]
+    if state.manufacturer == "landrover":
+        candidates = candidates + td5_candidates()
+    try:
+        session = LegacyKLineSession.auto(elm, candidates=candidates)
+        adapter = LegacyKLineAdapter(
+            session,
+            manufacturer=state.manufacturer if state.manufacturer != "generic" else None,
+        )
+        state.set_legacy_scanner(adapter)
+        info = session.info
+        print(f"  ✅ {t('kline_detected')}")
+        print(f"  {t('kline_profile')}: {info.profile_name}")
+        print(f"  {t('kline_reason')}: {info.reason}")
+        return True
+    except KLineDetectError:
+        try:
+            elm.close()
+        except Exception:
+            pass
+        return False
+    except Exception:
+        try:
+            elm.close()
+        except Exception:
+            pass
+        return False

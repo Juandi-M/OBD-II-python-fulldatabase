@@ -50,8 +50,12 @@ def _select_module(brand: str) -> str:
 
 
 def uds_tools_menu(state: AppState) -> None:
-    scanner = require_connected_scanner(state.scanner)
+    scanner = require_connected_scanner(state)
     if not scanner:
+        return
+    if getattr(scanner, "is_legacy", False):
+        print(f"\n  ❌ {t('uds_not_supported')}")
+        press_enter()
         return
 
     print_header(t("uds_header"))

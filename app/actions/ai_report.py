@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import webbrowser
 from typing import Any, Dict, List, Optional
 
 from obd.obd2.base import ConnectionLostError, NotConnectedError, ScannerError
@@ -14,6 +15,8 @@ from openai.client import OpenAIError, chat_completion, get_api_key, get_model
 from app.reports import ReportMeta, find_report_by_id, list_reports, save_report
 from app.state import AppState
 from app.ui import press_enter, print_header, print_menu
+from paywall.client import PaywallClient, PaywallError, PaymentRequired
+from paywall.config import is_bypass_enabled
 
 
 def ai_report_menu(state: AppState) -> None:
@@ -42,16 +45,18 @@ def ai_report_menu(state: AppState) -> None:
 
 
 def run_ai_report(state: AppState) -> None:
-    if state.report_requests >= state.report_limit:
-        print(f"\n  ⚠️  {t('ai_report_limit')}")
-        print(f"  {t('ai_report_paywall')}")
-        return
-
     if not get_api_key():
         print(f"\n  ❌ {t('ai_report_missing_key')}")
         return
 
-    scanner = require_connected_scanner(state.scanner)
+    paywall_client = None
+    if not is_bypass_enabled():
+        paywall_client = PaywallClient()
+        if not paywall_client.is_configured:
+            print(f"\n  ❌ {t('paywall_not_configured')}")
+            return
+
+    scanner = require_connected_scanner(state)
     if not scanner:
         return
 
@@ -70,6 +75,9 @@ def run_ai_report(state: AppState) -> None:
         print(f"\n  ❌ {t('error')}: {exc}")
         return
 
+    if not _ensure_report_credit(paywall_client):
+        return
+
     report_payload: Dict[str, Any] = {
         "status": "pending",
         "customer_notes": customer_notes,
@@ -78,7 +86,6 @@ def run_ai_report(state: AppState) -> None:
     report_path = save_report(report_payload)
     print(f"\n  ✅ {t('ai_report_saved', path=str(report_path))}")
 
-    state.report_requests += 1
     print(f"  {t('ai_report_wait')}")
 
     spinner = Spinner()
@@ -105,6 +112,43 @@ def run_ai_report(state: AppState) -> None:
     update_report_status(report_path, status="complete", response=response, model=get_model())
     print(f"\n  ✅ {t('ai_report_complete')}")
     print_report_summary(response)
+
+
+def _ensure_report_credit(client: Optional[PaywallClient]) -> bool:
+    if is_bypass_enabled():
+        print(f"\n  {t('paywall_bypass_enabled')}")
+        return True
+    if client is None:
+        print(f"\n  ❌ {t('paywall_not_configured')}")
+        return False
+    try:
+        client.consume("generate_report", cost=1)
+        return True
+    except PaymentRequired:
+        try:
+            url = client.checkout()
+        except PaywallError as exc:
+            print(f"\n  ❌ {t('paywall_error')}: {exc}")
+            return False
+
+        print(f"\n  {t('paywall_checkout_url')}: {url}")
+        print(f"  {t('paywall_checkout_hint')}")
+        webbrowser.open(url)
+        print(f"\n  {t('paywall_polling')}")
+
+        balance = client.wait_for_balance(min_paid=1, timeout_seconds=180)
+        if balance.paid_credits < 1 and balance.free_remaining < 1:
+            print(f"\n  ❌ {t('paywall_payment_required')}")
+            return False
+        try:
+            client.consume("generate_report", cost=1)
+            return True
+        except PaywallError as exc:
+            print(f"\n  ❌ {t('paywall_error')}: {exc}")
+            return False
+    except PaywallError as exc:
+        print(f"\n  ❌ {t('paywall_error')}: {exc}")
+        return False
 
 
 def show_reports() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from obd import ELM327
 
 from app.i18n import t, get_available_languages, get_language, get_language_name, set_language
-from app.paywall import paywall_menu
+from paywall.menu import paywall_menu
 from app.state import AppState
 from app.ui import clear_screen, press_enter, print_menu
 
@@ -97,6 +97,6 @@ def settings_menu(state: AppState) -> None:
                 print(f"\n  ❌ {t('invalid_number')}")
             press_enter()
         elif choice == "6":
-            paywall_menu(state)
+            paywall_menu()
         elif choice == "0":
             break

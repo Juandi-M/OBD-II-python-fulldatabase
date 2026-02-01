@@ -37,17 +37,20 @@ def print_menu(title: str, options: List[Tuple[str, str]]) -> None:
 
 
 def print_status(state: AppState) -> None:
-    connected = state.scanner and state.scanner.is_connected
+    connected = state.active_scanner() is not None
+    protocol = "K-LINE" if state.legacy_scanner and state.legacy_scanner.is_connected else "OBD2"
     conn_status = f"🟢 {t('connected')}" if connected else f"🔴 {t('disconnected')}"
     mfr = state.manufacturer.capitalize()
     lang = get_language().upper()
     print(
         f"\n  {t('status')}: {conn_status} | {t('vehicle')}: {mfr} | "
-        f"{t('format')}: {state.log_format.upper()} | {lang}"
+        f"{t('format')}: {state.log_format.upper()} | {t('protocol')}: {protocol} | {lang}"
     )
 
 
 def handle_disconnection(state: AppState) -> None:
+    if state.legacy_scanner:
+        state.clear_legacy_scanner()
     if state.scanner:
         state.scanner._connected = False
     print(f"\n  ❌ {t('error')}: {t('device_disconnected')}")

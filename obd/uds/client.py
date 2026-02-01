@@ -189,7 +189,7 @@ class UdsClient:
             "did": "F190",
             "raw": "313233...",
             "name": "VIN",
-            "value": "XXX..."
+            "value": "1HGCM82633A004352"
           }
         """
         norm_brand = normalize_brand(brand)

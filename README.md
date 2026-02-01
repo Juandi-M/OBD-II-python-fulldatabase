@@ -97,7 +97,7 @@ Access settings by pressing `S` in the main menu:
 - **Log Format** — Choose CSV or JSON for session logs
 - **Monitor Interval** — Adjust refresh rate for live telemetry (0.5s - 10s)
 - **View Serial Ports** — See available USB serial ports
-- **Paywall / Stripe** — Configure Stripe checkout settings
+- **Paywall / Credits** — Configure the paywall API and checkout flow
 
 ---
 
@@ -108,7 +108,8 @@ as JSON files under `data/reports/` and can be re-opened from the CLI.
 
 ### Configuration
 
-Set your API key before running the CLI:
+Set your API key before running the CLI. You can export env vars directly or place
+them in a local `.env` file (see `.env.example`):
 
 ```bash
 export OPENAI_API_KEY="your-key-here"
@@ -118,16 +119,24 @@ export OPENAI_MODEL="gpt-4o-mini"
 
 ---
 
-## Paywall (Stripe placeholder)
+## Paywall (Credits service)
 
-The CLI includes a placeholder Stripe checkout flow under **Settings → Paywall / Stripe**.
-Configure the following environment variable and fields before starting a checkout:
+The CLI integrates with a credits-based billing service (separate backend). Configure
+the API base before using paywalled actions:
 
 ```bash
-export STRIPE_API_KEY="your-stripe-key"
+export PAYWALL_API_BASE="https://api.yourdomain.com"
 ```
 
-Then set a Stripe price ID and success/cancel URLs inside the paywall menu.
+You can also set this in **Settings → Paywall / Credits**. The CLI will request
+identity, consume credits before generating reports, and open a checkout URL when
+payment is required.
+
+For local testing, you can bypass the paywall:
+
+```bash
+export OBD_SUPERUSER=1
+```
 
 ---
 
@@ -143,12 +152,12 @@ obd2-scanner/
 │   ├── dtc_jeep_dodge_chrysler.csv  # Chrysler/Jeep/Dodge specific
 │   ├── dtc_land_rover.csv       # Land Rover/Jaguar specific
 │   ├── i18n/                    # CLI language packs
-│   ├── paywall.json             # Paywall configuration
 │   ├── reports/                 # Saved AI reports
 │   └── uds/                     # UDS DID/module/routine definitions
 ├── logs/                    # Session logs (auto-created)
 │   └── session_YYYY-MM-DD_HH-MM-SS.csv
-├── openai/                  # OpenAI and Stripe integrations
+├── openai/                  # OpenAI integrations
+├── paywall/                 # Paywall client, config, and CLI menu
 └── obd/
     ├── __init__.py          # Package exports
     ├── elm/elm327.py        # ELM327 adapter communication
