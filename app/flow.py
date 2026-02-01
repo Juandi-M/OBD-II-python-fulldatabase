@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 from obd.utils import VERSION, cr_timestamp
 
-from app.actions.ai_report import run_ai_report
+from app.actions.ai_report import ai_report_menu
 from app.actions.clear_codes import clear_codes
 from app.actions.connect import connect_vehicle, disconnect_vehicle
 from app.actions.freeze_frame import read_freeze_frame
@@ -127,8 +127,7 @@ def main_menu(state: AppState) -> None:
         elif choice == "11":
             uds_tools_menu(state)
         elif choice == "12":
-            run_ai_report(state)
-            press_enter()
+            ai_report_menu(state)
         elif choice == "S":
             settings_menu(state)
         elif choice == "0":

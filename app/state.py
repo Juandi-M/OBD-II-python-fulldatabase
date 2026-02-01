@@ -16,6 +16,8 @@ class AppState:
     language: str = "en"
     stop_monitoring: bool = False
     demo: bool = False
+    report_requests: int = 0
+    report_limit: int = 4
 
     def ensure_scanner(self) -> OBDScanner:
         if not self.scanner:

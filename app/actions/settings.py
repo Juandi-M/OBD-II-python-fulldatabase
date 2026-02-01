@@ -3,6 +3,7 @@ from __future__ import annotations
 from obd import ELM327
 
 from app.i18n import t, get_available_languages, get_language, get_language_name, set_language
+from app.paywall import paywall_menu
 from app.state import AppState
 from app.ui import clear_screen, press_enter, print_menu
 
@@ -18,6 +19,7 @@ def settings_menu(state: AppState) -> None:
                 ("3", f"{t('monitor_interval'):<20} [{state.monitor_interval}s]"),
                 ("4", t("view_ports")),
                 ("5", f"{t('language'):<20} [{get_language_name(get_language())}]"),
+                ("6", t("paywall_settings")),
                 ("0", t("back")),
             ],
         )
@@ -94,5 +96,7 @@ def settings_menu(state: AppState) -> None:
             else:
                 print(f"\n  ❌ {t('invalid_number')}")
             press_enter()
+        elif choice == "6":
+            paywall_menu(state)
         elif choice == "0":
             break
