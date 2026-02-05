@@ -10,8 +10,10 @@ class PortsScannerImpl(PortsScanner):
     def scan_usb_ports(self) -> List[str]:
         return scan_usb_ports()
 
-    def scan_ble_devices(self, include_all: bool = False) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
-        return scan_ble_devices(include_all=include_all)
+    def scan_ble_devices(
+        self, include_all: bool = False, timeout_s: Optional[float] = None
+    ) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
+        return scan_ble_devices(include_all=include_all, timeout_s=timeout_s)
 
     def try_connect(self, scanner: ScannerPort, port: str) -> Tuple[bool, Dict[str, Any], Optional[Exception]]:
         return try_connect(scanner, port)

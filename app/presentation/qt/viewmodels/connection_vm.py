@@ -20,19 +20,25 @@ class ConnectionViewModel(QObject):
         self.connection = connection
         self.thread_pool = QThreadPool.globalInstance()
 
-    def scan_usb(self) -> None:
+    def scan_usb(self, request_id: int = 0) -> None:
         worker = Worker(self.connection.scan_usb_ports)
-        worker.signals.finished.connect(self.usb_scan_finished.emit)
+        worker.signals.finished.connect(
+            lambda result, err, rid=request_id: self.usb_scan_finished.emit((rid, result), err)
+        )
         self.thread_pool.start(worker)
 
-    def scan_ble(self, include_all: bool = False) -> None:
-        worker = Worker(self.connection.scan_ble_devices, include_all)
-        worker.signals.finished.connect(self.ble_scan_finished.emit)
+    def scan_ble(self, include_all: bool = False, request_id: int = 0, timeout_s: Optional[float] = None) -> None:
+        worker = Worker(self.connection.scan_ble_devices, include_all=include_all, timeout_s=timeout_s)
+        worker.signals.finished.connect(
+            lambda result, err, rid=request_id: self.ble_scan_finished.emit((rid, result), err)
+        )
         self.thread_pool.start(worker)
 
-    def connect_device(self, port: str, use_kline: bool) -> None:
+    def connect_device(self, port: str, use_kline: bool, request_id: int = 0) -> None:
         worker = Worker(self._connect_job, port, use_kline)
-        worker.signals.finished.connect(self.connect_finished.emit)
+        worker.signals.finished.connect(
+            lambda result, err, rid=request_id: self.connect_finished.emit((rid, result), err)
+        )
         self.thread_pool.start(worker)
 
     def _connect_job(self, port: str, use_kline: bool) -> Dict[str, Any]:

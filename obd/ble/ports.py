@@ -4,7 +4,76 @@ import asyncio
 import threading
 from typing import List, Optional, Tuple
 
-from .config import ble_address, ble_name, ble_scan_timeout_s
+from .config import ble_address, ble_name, ble_scan_timeout_s, ble_service_uuid
+
+
+# Heuristics for identifying "likely" OBD BLE adapters when the user does NOT
+# opt-in to showing all BLE devices.
+#
+# Many adapters advertise with generic names (e.g., "Y013420") and/or custom
+# 128-bit service UUIDs. A strict allow-list leads to "0 devices found" even
+# though an adapter is nearby. We therefore combine:
+# - name tokens (common brands/models)
+# - known UART-ish services (NUS / HM-10 / common ELM services)
+# - fallback: any non-empty service UUID + a non-noise name (avoid AirPods/iPhone)
+_ADAPTER_NAME_TOKENS = (
+    "veepeak",
+    "obd",
+    "obd2",
+    "obdii",
+    "obdlink",
+    "vlinker",
+    "elm",
+    "vgate",
+    "car scanner",
+    "scan tool",
+    "scantool",
+    "diagnostic",
+    "obdcheck",
+)
+
+_NOISE_NAME_TOKENS = (
+    "airpods",
+    "iphone",
+    "watch",
+    "macbook",
+    "ipad",
+    "beats",
+    "bose",
+    "sony",
+    "jabra",
+)
+
+_KNOWN_SERVICE_UUIDS_BASE = {
+    # Nordic UART Service (common BLE UART)
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    # HM-10 / CC254x defaults and clones
+    "0000ffe0-0000-1000-8000-00805f9b34fb",
+    # Common ELM327 BLE service seen on some adapters
+    "0000fff0-0000-1000-8000-00805f9b34fb",
+}
+
+
+def _is_noise_name(name: str) -> bool:
+    n = (name or "").lower()
+    return any(token in n for token in _NOISE_NAME_TOKENS)
+
+
+def _looks_like_adapter_name(name: str) -> bool:
+    n = (name or "").lower()
+    return any(token in n for token in _ADAPTER_NAME_TOKENS)
+
+
+def _alnum_serialish(name: str) -> bool:
+    n = (name or "").strip()
+    if not n or n == "-":
+        return False
+    compact = n.replace(" ", "")
+    if not compact.isalnum():
+        return False
+    if not any(ch.isdigit() for ch in compact):
+        return False
+    return 4 <= len(compact) <= 14
 
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
@@ -104,11 +173,11 @@ def find_ble_ports() -> List[str]:
             uuids = getattr(adv, "service_uuids", None) or []
             return [str(u).lower() for u in uuids]
 
-        known_service_tokens = {
-            "6e400001-b5a3-f393-e0a9-e50e24dcca9e",  # Nordic UART
-            "0000ffe0-0000-1000-8000-00805f9b34fb",  # HM-10
-            "0000fff0-0000-1000-8000-00805f9b34fb",
-        }
+        known_service_tokens = set(_KNOWN_SERVICE_UUIDS_BASE)
+        # Allow overriding the service UUID via env var for odd adapters.
+        svc_override = (ble_service_uuid() or "").strip().lower()
+        if svc_override:
+            known_service_tokens.add(svc_override)
         for item in items:
             if isinstance(item, tuple) and len(item) == 2:
                 dev, adv = item
@@ -126,20 +195,24 @@ def find_ble_ports() -> List[str]:
                 if target_name.lower() in name.lower():
                     named_matches.append((rssi, addr))
                 continue
-            if name:
-                if any(token in name.lower() for token in ["veepeak", "obdcheck", "obd"]):
-                    named_matches.append((rssi, addr))
-                else:
-                    others.append((rssi, addr))
+            if _is_noise_name(name):
+                continue
+            name_hit = _looks_like_adapter_name(name)
+            has_any_service = bool(svc_uuids)
+            if name_hit or has_known_service:
+                named_matches.append((rssi, addr))
+            elif name and has_any_service and _alnum_serialish(name):
+                # Generic-name adapters still often advertise a custom service UUID.
+                # Keep this conservative to avoid "random" devices.
+                others.append((rssi, addr))
             else:
-                if has_known_service:
-                    named_matches.append((rssi, addr))
-                else:
-                    unnamed.append((rssi, addr))
+                unnamed.append((rssi, addr))
 
         if named_matches:
             return [addr for _, addr in sorted(named_matches, key=lambda x: x[0], reverse=True)]
-        # If we can't identify an OBD/BLE adapter by name or service, don't try random devices.
+        if others:
+            return [addr for _, addr in sorted(others, key=lambda x: x[0], reverse=True)]
+        # If we can't identify anything by name/service, don't try random devices.
         return []
 
     try:
@@ -148,7 +221,11 @@ def find_ble_ports() -> List[str]:
         return []
 
 
-def scan_ble_devices(include_all: bool = False) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
+def scan_ble_devices(
+    include_all: bool = False,
+    *,
+    timeout_s: Optional[float] = None,
+) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
     try:
         from bleak import BleakScanner
     except Exception:
@@ -178,21 +255,21 @@ def scan_ble_devices(include_all: bool = False) -> Tuple[List[Tuple[str, str, in
         uuids = getattr(adv, "service_uuids", None) or []
         return [str(u).lower() for u in uuids]
 
-    known_service_tokens = {
-        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
-        "0000ffe0-0000-1000-8000-00805f9b34fb",
-        "0000fff0-0000-1000-8000-00805f9b34fb",
-    }
+    known_service_tokens = set(_KNOWN_SERVICE_UUIDS_BASE)
+    svc_override = (ble_service_uuid() or "").strip().lower()
+    if svc_override:
+        known_service_tokens.add(svc_override)
 
-    async def _scan() -> List[Tuple[str, str, int]]:
+    async def _scan() -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
         try:
+            timeout = float(timeout_s) if timeout_s is not None else ble_scan_timeout_s()
             try:
                 result = await BleakScanner.discover(
-                    timeout=ble_scan_timeout_s(),
+                    timeout=timeout,
                     return_adv=True,
                 )
             except TypeError:
-                result = await BleakScanner.discover(timeout=ble_scan_timeout_s())
+                result = await BleakScanner.discover(timeout=timeout)
         except Exception:
             return [], "ble_error"
 
@@ -224,8 +301,13 @@ def scan_ble_devices(include_all: bool = False) -> Tuple[List[Tuple[str, str, in
 
             svc_uuids = _service_uuids(adv)
             has_known_service = any(u in known_service_tokens for u in svc_uuids)
-            name_hit = any(token in name.lower() for token in ["veepeak", "obdcheck", "obd"])
-            if name_hit or has_known_service:
+            if _is_noise_name(name):
+                continue
+            name_hit = _looks_like_adapter_name(name)
+            has_any_service = bool(svc_uuids)
+            # Filtered mode: show likely adapters, but include "serial-ish" names with any service UUID
+            # so generic-name adapters (common on BLE) still appear without toggling "Show all".
+            if name_hit or has_known_service or (has_any_service and _alnum_serialish(name)):
                 devices.append((rssi, addr, name))
 
         devices.sort(key=lambda x: x[0], reverse=True)

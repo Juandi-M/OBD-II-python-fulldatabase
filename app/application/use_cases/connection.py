@@ -20,8 +20,10 @@ class ConnectionService:
     def scan_usb_ports(self) -> List[str]:
         return self.ports_scanner.scan_usb_ports()
 
-    def scan_ble_devices(self, include_all: bool = False) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
-        return self.ports_scanner.scan_ble_devices(include_all=include_all)
+    def scan_ble_devices(
+        self, include_all: bool = False, timeout_s: Optional[float] = None
+    ) -> Tuple[List[Tuple[str, str, int]], Optional[str]]:
+        return self.ports_scanner.scan_ble_devices(include_all=include_all, timeout_s=timeout_s)
 
     def try_connect(
         self,

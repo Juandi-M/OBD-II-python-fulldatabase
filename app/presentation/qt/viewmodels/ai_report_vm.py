@@ -42,6 +42,7 @@ class AiReportViewModel(QObject):
         self.scans = scans
 
     def is_configured(self) -> bool:
+        """True when AI report generation is usable (OPENAI_API_KEY present)."""
         return self.ai_config.is_configured()
 
     def get_model(self) -> str:
@@ -62,7 +63,7 @@ class AiReportViewModel(QObject):
     def detect_report_language(self, customer_notes: str, default_language: str, *, mode: str = "cli") -> str:
         return detect_report_language(customer_notes, default_language, mode=mode)
 
-    def extract_report_parts(self, response: str, *, mode: str = "cli") -> Dict[str, Any]:
+    def extract_report_parts(self, response: str, *, mode: str = "cli") -> Tuple[Optional[Dict[str, Any]], str]:
         return extract_report_parts(response, mode=mode)
 
     def update_report_status(
@@ -96,8 +97,22 @@ class AiReportViewModel(QObject):
     def request_report(self, report_input: Dict[str, Any], language: str) -> str:
         return self.ai_reports.request_report(report_input, language)
 
-    def export_pdf(self, payload: Dict[str, Any], output_path: str, report_text: Optional[str] = None, language: Optional[str] = None) -> None:
-        return self.ai_reports.export_pdf(payload, output_path, report_text=report_text, language=language)
+    def export_pdf(
+        self,
+        payload: Dict[str, Any],
+        output_path: str,
+        *,
+        report_json: Optional[Dict[str, Any]] = None,
+        report_text: Optional[str] = None,
+        language: Optional[str] = None,
+    ) -> None:
+        return self.ai_reports.export_pdf(
+            payload,
+            output_path,
+            report_json=report_json,
+            report_text=report_text,
+            language=language,
+        )
 
     def collect_scan_report(self) -> Dict[str, Any]:
         return self.scans.collect_scan_report()
@@ -117,70 +132,32 @@ class AiReportViewModel(QObject):
     def report_pdf_path(self, report_id: str) -> str:
         return self.pdf_paths.report_pdf_path(report_id)
 
+    # Paywall wrappers kept explicit to avoid confusion with AI config.
     def paywall_is_bypass_enabled(self) -> bool:
-        return self.paywall.is_bypass_enabled()
-
-    def is_bypass_enabled(self) -> bool:
         return self.paywall.is_bypass_enabled()
 
     def paywall_api_base(self) -> Optional[str]:
         return self.paywall.api_base()
 
-    def api_base(self) -> Optional[str]:
-        return self.paywall.api_base()
-
-    def paywall_set_api_base(self, api_base: str) -> None:
-        self.paywall.set_api_base(api_base)
-
-    def set_api_base(self, api_base: str) -> None:
-        self.paywall.set_api_base(api_base)
-
     def paywall_subject_id(self) -> Optional[str]:
-        return self.paywall.subject_id()
-
-    def subject_id(self) -> Optional[str]:
         return self.paywall.subject_id()
 
     def paywall_is_configured(self) -> bool:
         return self.paywall.is_configured()
 
-    def is_configured(self) -> bool:
-        return self.paywall.is_configured()
-
     def paywall_cached_balance(self):
-        return self.paywall.cached_balance()
-
-    def cached_balance(self):
         return self.paywall.cached_balance()
 
     def paywall_pending_total(self) -> int:
         return self.paywall.pending_total()
 
-    def pending_total(self) -> int:
-        return self.paywall.pending_total()
-
     def paywall_get_balance(self):
         return self.paywall.get_balance()
 
-    def get_balance(self):
-        return self.paywall.get_balance()
-
-    def paywall_ensure_identity(self):
-        return self.paywall.ensure_identity()
-
-    def ensure_identity(self):
-        return self.paywall.ensure_identity()
-
     def paywall_reset_identity(self) -> None:
-        return self.paywall.reset_identity()
-
-    def reset_identity(self) -> None:
-        return self.paywall.reset_identity()
+        self.paywall.reset_identity()
 
     def paywall_checkout(self) -> str:
-        return self.paywall.checkout()
-
-    def checkout(self) -> str:
         return self.paywall.checkout()
 
     def paywall_consume(self, action: str, cost: int = 1) -> None:
@@ -188,6 +165,3 @@ class AiReportViewModel(QObject):
             self.paywall.consume(action, cost=cost)
         except PaymentRequiredError:
             raise
-
-    def consume(self, action: str, cost: int = 1) -> None:
-        self.paywall_consume(action, cost=cost)

@@ -13,10 +13,10 @@ def scan_usb_ports() -> list[str]:
     return ELM327.find_ports()
 
 
-def scan_ble_devices(include_all: bool = False):
+def scan_ble_devices(include_all: bool = False, timeout_s: Optional[float] = None):
     from obd.ble.ports import scan_ble_devices
 
-    return scan_ble_devices(include_all=include_all)
+    return scan_ble_devices(include_all=include_all, timeout_s=timeout_s)
 
 
 def try_connect(scanner: ScannerPort, port: str, raw_logger=None) -> Tuple[bool, Dict[str, Any], Optional[Exception]]:
